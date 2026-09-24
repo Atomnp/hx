@@ -1,0 +1,23 @@
+[project]
+name = "hx"
+version = "0.1.0"
+description = "A coding-agent harness built step by step, for learning."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+hx = "hx.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/hx"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
