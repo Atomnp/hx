@@ -11,13 +11,23 @@ from hx.events import (
 )
 from hx.messages import Message, ToolCall, system, tool_result, user
 from hx.models.base import ModelClient
+from hx.tools import ToolContext, ToolRegistry
 
 DEFAULT_SYSTEM_PROMPT = "You are hx, a helpful coding assistant running in the user's terminal. Be concise."
 
 
 class Agent:
-    def __init__(self, model: ModelClient, system_prompt: str = DEFAULT_SYSTEM_PROMPT, max_steps: int = 25):
+    def __init__(
+        self,
+        model: ModelClient,
+        tools: ToolRegistry | None = None,
+        ctx: ToolContext | None = None,
+        system_prompt: str = DEFAULT_SYSTEM_PROMPT,
+        max_steps: int = 25,
+    ):
         self.model = model
+        self.tools = tools or ToolRegistry()
+        self.ctx = ctx or ToolContext()
         self.max_steps = max_steps  # safety stop so a confused model can't loop forever
         self.messages: list[Message] = [system(system_prompt)]
 
@@ -26,7 +36,11 @@ class Agent:
         self.messages.append(user(text))
 
         for step in range(1, self.max_steps + 1):
-            response = self.model.chat(self.messages, on_text=lambda t: on_event(TextDelta(t)))
+            response = self.model.chat(
+                self.messages,
+                tools=self.tools.schemas() or None,
+                on_text=lambda t: on_event(TextDelta(t)),
+            )
             self.messages.append(response.message)
             on_event(StepFinished(step, response.usage))
 
@@ -44,6 +58,5 @@ class Agent:
         return ""
 
     def run_tool(self, call: ToolCall) -> tuple[str, bool]:
-        # No tools exist yet. Answering with an error, instead of crashing,
-        # lets the model see the problem and recover. That's how all tool errors will work.
-        return f"Error: unknown tool '{call.name}'. No tools are available.", True
+        result = self.tools.execute(call, self.ctx)
+        return result.content, result.is_error
