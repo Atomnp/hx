@@ -9,6 +9,7 @@ from hx.config import Settings
 from hx.events import Event, StepFinished, TextDelta, ToolFinished, ToolStarted
 from hx.models import ModelError
 from hx.models.ollama import OllamaClient
+from hx.tools.builtin import default_tools
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -54,5 +55,5 @@ def main(argv: list[str] | None = None) -> int:
     settings = Settings.from_env()
     if args.model:
         settings.model = args.model
-    repl(Agent(OllamaClient(settings)))
+    repl(Agent(OllamaClient(settings), tools=default_tools()))
     return 0
