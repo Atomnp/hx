@@ -16,6 +16,9 @@ class ToolContext:
     """What a tool may need to know about the session it runs in."""
 
     cwd: Path = field(default_factory=Path.cwd)  # the workspace root; relative paths resolve against it
+    # Files the model has read this session -> their mtime when read. Edit tools require an entry (read
+    # before you modify) and an unchanged mtime (nobody changed it since). See tools/fs_edit.py.
+    read_files: dict[str, int] = field(default_factory=dict)
 
 
 class Tool:

@@ -67,10 +67,12 @@ class ReadFile(Tool):
         limit = max(1, args.get("limit", MAX_LINES))
         lines = path.read_text(errors="replace").splitlines()
         if not lines:
+            ctx.read_files[str(path)] = path.stat().st_mtime_ns
             return ToolResult(f"({path} is empty)")
         if offset > len(lines):
             return ToolResult(f"Error: offset {offset} is past the end of the file ({len(lines)} lines).", True)
 
+        ctx.read_files[str(path)] = path.stat().st_mtime_ns  # lets edit tools check read-before-edit
         chunk = lines[offset - 1 : offset - 1 + limit]
         out = []
         for n, line in enumerate(chunk, start=offset):
