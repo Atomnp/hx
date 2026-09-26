@@ -6,6 +6,7 @@ import sys
 from hx import __version__
 from hx.agent import Agent
 from hx.checkpoints import CheckpointError, checkpoints_for
+from hx.context import ContextManager
 from hx.config import Settings
 from hx.events import Event, Notice, StepFinished, TextDelta, ToolFinished, ToolStarted
 from hx.models import ModelError
@@ -55,7 +56,8 @@ def print_event(event: Event) -> None:
         print(f"  [hx] {event.text}", file=sys.stderr, flush=True)
     elif isinstance(event, StepFinished):
         u = event.usage
-        print(f"\n  [{u.prompt_tokens} in / {u.completion_tokens} out, {u.duration_s:.1f}s]", file=sys.stderr, flush=True)
+        print(f"\n  [{u.prompt_tokens} in / {u.completion_tokens} out, {u.duration_s:.1f}s, context {event.context_used:.0%}]",
+              file=sys.stderr, flush=True)
 
 
 def repl(agent: Agent) -> None:
@@ -107,6 +109,7 @@ def main(argv: list[str] | None = None) -> int:
         ctx=ctx,
         system_prompt=build_system_prompt(ctx),
         checkpoints=checkpoints,
+        context=ContextManager(window=settings.num_ctx),
     )
     repl(agent)
     return 0

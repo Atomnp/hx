@@ -32,6 +32,7 @@ class StepFinished:
 
     step: int
     usage: Usage
+    context_used: float = 0.0  # share of the context budget the conversation now uses (0..1)
 
 
 @dataclass

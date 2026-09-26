@@ -1,6 +1,7 @@
 """The agent loop: call the model, run the tools it asks for, feed the results back, repeat."""
 
 from hx.checkpoints import CheckpointError, Checkpoints
+from hx.context import ContextManager
 from hx.events import (
     EventHandler,
     Notice,
@@ -28,6 +29,7 @@ class Agent:
         system_prompt: str = DEFAULT_SYSTEM_PROMPT,
         max_steps: int = 25,
         checkpoints: Checkpoints | None = None,
+        context: ContextManager | None = None,
     ):
         self.model = model
         self.tools = tools or ToolRegistry()
@@ -35,6 +37,7 @@ class Agent:
         self.max_steps = max_steps  # safety stop so a confused model can't loop forever
         self.messages: list[Message] = [system(system_prompt)]
         self.checkpoints = checkpoints
+        self.context = context or ContextManager()
         # One entry per turn: (snapshot taken before the turn, conversation length before the turn).
         self.turns: list[tuple[str | None, int]] = []
 
@@ -44,12 +47,16 @@ class Agent:
         self.messages.append(user(text))
         guard = LoopGuard()
 
+        self.context.set_tools(self.tools.schemas())
         for step in range(1, self.max_steps + 1):
+            for note in self.context.clear_old_results(self.messages):
+                on_event(Notice(note))
             response = self.model.chat(
                 self.messages,
                 tools=self.tools.schemas() or None,
                 on_text=lambda t: on_event(TextDelta(t)),
             )
+            self.context.calibrate(self.messages, response.usage.prompt_tokens)
             message = response.message
             if not message.tool_calls and self.tools.names():
                 # Some models write tool calls as text instead of using the tool-call channel.
@@ -58,7 +65,7 @@ class Agent:
                     message.tool_calls, message.content = calls, rest
                     on_event(Notice(f"parsed {len(calls)} tool call(s) the model wrote as text"))
             self.messages.append(message)
-            on_event(StepFinished(step, response.usage))
+            on_event(StepFinished(step, response.usage, self.context.fraction_used(self.messages)))
 
             if not message.tool_calls:
                 on_event(TurnFinished(message.content, step, "done"))
@@ -67,6 +74,7 @@ class Agent:
             for call in message.tool_calls:
                 on_event(ToolStarted(call))
                 result, is_error = self.run_tool(call)
+                result = self.context.truncate_tool_output(result)
                 if warning := guard.check(call):
                     result += f"\n[harness: {warning}]"
                     on_event(Notice(f"repeated call detected: {call.name}"))
