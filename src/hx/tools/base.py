@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from hx.permissions import Approver, PermissionPolicy
+    from hx.sandbox import SandboxConfig
 
 
 @dataclass
@@ -26,6 +27,7 @@ class ToolContext:
     # Permission checks. None = no checks (used by unit tests of individual tools).
     permissions: "PermissionPolicy | None" = None
     approve: "Approver | None" = None  # asks the user; None = nobody to ask, so "ask" becomes "deny"
+    sandbox: "SandboxConfig | None" = None  # OS sandbox for shell commands; None = off
 
 
 class Tool:

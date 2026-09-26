@@ -1,6 +1,7 @@
 // hx-exec: run one command for the hx harness and report what happened, as JSON.
 //
-//   hx-exec [--timeout SEC] [--max-output BYTES] [--cwd DIR] [--cpu SEC] [--fsize MB] -- CMD [ARGS...]
+//   hx-exec [--timeout SEC] [--max-output BYTES] [--cwd DIR] [--cpu SEC] [--fsize MB]
+//           [--sandbox [--allow-write DIR]... [--deny-read DIR]... [--allow-network]] -- CMD [ARGS...]
 //
 // What it guarantees, and plain subprocess calls don't:
 //   * the command can't wait on the keyboard: stdin is /dev/null
@@ -9,6 +10,8 @@
 //   * it can't flood memory or context: output is capped (head + tail kept)
 //   * resource limits (CPU seconds, max file size, no core dumps) are applied before exec
 //   * Ctrl-C / SIGTERM sent to hx-exec are forwarded to the command's group
+//   * with --sandbox, the kernel itself confines the command (macOS Seatbelt): writes only to the
+//     allowed directories, no network unless allowed, secrets unreadable. See sandbox.cpp.
 //
 // Output: one JSON object on stdout:
 //   {"exit_code":0,"signal":null,"timed_out":false,"interrupted":false,"duration_ms":12,
@@ -30,6 +33,7 @@
 
 #include "capture.hpp"
 #include "json.hpp"
+#include "sandbox.hpp"
 
 namespace {
 
@@ -41,12 +45,15 @@ struct Options {
     std::string cwd;
     long cpu_s = 0;     // 0 = no limit
     long fsize_mb = 0;  // 0 = no limit
+    bool sandbox = false;
+    hx::SandboxOptions sandbox_opts;
     std::vector<std::string> command;
 };
 
 [[noreturn]] void fail(const std::string& msg) {
     std::cerr << "hx-exec: " << msg << "\n"
-              << "usage: hx-exec [--timeout SEC] [--max-output BYTES] [--cwd DIR] [--cpu SEC] [--fsize MB] -- CMD [ARGS...]\n";
+              << "usage: hx-exec [--timeout SEC] [--max-output BYTES] [--cwd DIR] [--cpu SEC] [--fsize MB]\n"
+              << "               [--sandbox [--allow-write DIR]... [--deny-read DIR]... [--allow-network]] -- CMD [ARGS...]\n";
     std::exit(125);
 }
 
@@ -68,6 +75,10 @@ Options parse_args(int argc, char** argv) {
         else if (a == "--cwd") o.cwd = value();
         else if (a == "--cpu") o.cpu_s = std::stol(value());
         else if (a == "--fsize") o.fsize_mb = std::stol(value());
+        else if (a == "--sandbox") o.sandbox = true;
+        else if (a == "--allow-write") o.sandbox_opts.writable.push_back(value());
+        else if (a == "--deny-read") o.sandbox_opts.deny_read.push_back(value());
+        else if (a == "--allow-network") o.sandbox_opts.allow_network = true;
         else fail("unknown option " + a);
     }
     for (; i < argc; ++i) o.command.emplace_back(argv[i]);
@@ -106,7 +117,7 @@ void apply_limits(const Options& o) {
 
 // Runs in the forked child. Only async-signal-safe calls between fork() and exec() in a threaded parent;
 // hx-exec is single-threaded, but we keep to that rule anyway.
-[[noreturn]] void exec_child(const Options& o, int out_fd, char* const* argv) {
+[[noreturn]] void exec_child(const Options& o, const std::string& profile, int out_fd, char* const* argv) {
     setpgid(0, 0);  // new process group: lets the parent signal the command AND everything it spawns
 
     int devnull = open("/dev/null", O_RDONLY);
@@ -126,6 +137,13 @@ void apply_limits(const Options& o) {
         _exit(126);
     }
     apply_limits(o);
+    if (o.sandbox) {
+        std::string error;
+        if (!hx::apply_sandbox(profile, error)) {
+            dprintf(STDERR_FILENO, "hx-exec: sandbox failed: %s\n", error.c_str());
+            _exit(126);  // never fall back to running unsandboxed
+        }
+    }
     execvp(argv[0], argv);
     dprintf(STDERR_FILENO, "hx-exec: cannot run %s: %s\n", argv[0], strerror(errno));
     _exit(127);  // same code a shell uses for "command not found"
@@ -145,6 +163,9 @@ int main(int argc, char** argv) {
     for (auto& s : o.command) child_argv.push_back(s.data());
     child_argv.push_back(nullptr);
 
+    // Build the sandbox profile before forking too (it allocates).
+    std::string profile = o.sandbox ? hx::build_profile(o.sandbox_opts) : "";
+
     int fds[2];
     if (pipe(fds) != 0) fail(std::string("pipe: ") + strerror(errno));
 
@@ -154,7 +175,7 @@ int main(int argc, char** argv) {
     if (pid < 0) fail(std::string("fork: ") + strerror(errno));
     if (pid == 0) {
         close(fds[0]);
-        exec_child(o, fds[1], child_argv.data());
+        exec_child(o, profile, fds[1], child_argv.data());
     }
 
     setpgid(pid, pid);  // also set from the parent, to win the race with exec
@@ -226,6 +247,7 @@ int main(int argc, char** argv) {
     std::cout << "{\"exit_code\":" << exit_code << ",\"signal\":" << signal_json
               << ",\"timed_out\":" << (timed_out ? "true" : "false")
               << ",\"interrupted\":" << (interrupted ? "true" : "false")
+              << ",\"sandboxed\":" << (o.sandbox ? "true" : "false")
               << ",\"duration_ms\":" << ms_since(started) << ",\"output_bytes\":" << capture.total_bytes()
               << ",\"truncated_bytes\":" << capture.truncated_bytes() << ",\"output\":" << hx::json_string(capture.text())
               << "}\n";

@@ -7,6 +7,7 @@ import subprocess
 import time
 
 from hx.native import find_binary
+from hx.sandbox import looks_blocked
 from hx.tools.base import Tool, ToolContext, ToolResult
 
 DEFAULT_TIMEOUT = 120
@@ -29,13 +30,14 @@ def exec_binary() -> str | None:
     return find_binary("hx-exec", "exec")
 
 
-def run_native(binary: str, command: str, cwd: str, timeout: int) -> dict:
+def run_native(binary: str, command: str, cwd: str, timeout: int, sandbox_args: list[str] | None = None) -> dict:
     argv = [
         binary,
         "--timeout", str(timeout),
         "--max-output", str(MAX_OUTPUT),
         "--cwd", cwd,
         "--fsize", str(MAX_FILE_MB),
+        *(sandbox_args or []),
         "--", "/bin/bash", "-c", command,
     ]
     proc = subprocess.run(argv, capture_output=True, text=True, errors="replace", env={**os.environ, **QUIET_ENV}, timeout=timeout + 15)
@@ -85,6 +87,7 @@ def run_python(command: str, cwd: str, timeout: int) -> dict:
         "signal": signal.Signals(-code).name if code < 0 else None,
         "timed_out": timed_out,
         "interrupted": False,
+        "sandboxed": False,
         "duration_ms": int((time.monotonic() - started) * 1000),
         "output_bytes": total,
         "truncated_bytes": truncated,
@@ -95,6 +98,11 @@ def run_python(command: str, cwd: str, timeout: int) -> dict:
 def format_result(r: dict, timeout: int) -> ToolResult:
     out = r["output"].rstrip("\n") or "(no output)"
     notes = []
+    if r.get("sandboxed") and r["exit_code"] != 0 and looks_blocked(r["output"]):
+        notes.append(
+            "ran in the sandbox, which blocks network access and writes outside the workspace; "
+            "if the command genuinely needs those, retry with sandbox=false (the user must approve)"
+        )
     if r["timed_out"]:
         notes.append(f"timed out after {timeout}s; the command and its child processes were killed")
     elif r["signal"]:
@@ -120,6 +128,11 @@ class Bash(Tool):
         "properties": {
             "command": {"type": "string", "description": "The bash command to run"},
             "timeout": {"type": "integer", "description": f"Seconds before the command is killed (default {DEFAULT_TIMEOUT})"},
+            "sandbox": {
+                "type": "boolean",
+                "description": "Default true: the command can't use the network or write outside the workspace. "
+                "Set false only when it must (e.g. installing packages); that always needs the user's approval.",
+            },
         },
         "required": ["command"],
         "additionalProperties": False,
@@ -129,7 +142,13 @@ class Bash(Tool):
         timeout = min(max(1, args.get("timeout", DEFAULT_TIMEOUT)), MAX_TIMEOUT)
         binary = exec_binary()
         if binary:
-            r = run_native(binary, args["command"], str(ctx.cwd), timeout)
+            sandbox_args = ctx.sandbox.hx_exec_args(ctx.cwd) if sandboxed(ctx, args) else None
+            r = run_native(binary, args["command"], str(ctx.cwd), timeout, sandbox_args)
         else:
-            r = run_python(args["command"], str(ctx.cwd), timeout)
+            r = run_python(args["command"], str(ctx.cwd), timeout)  # no sandbox without hx-exec
         return format_result(r, timeout)
+
+
+def sandboxed(ctx: ToolContext, args: dict) -> bool:
+    """Will this bash call run inside the OS sandbox? Permissions use this too."""
+    return bool(ctx.sandbox and ctx.sandbox.enabled and exec_binary() and args.get("sandbox", True))

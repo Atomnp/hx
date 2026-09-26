@@ -212,10 +212,16 @@ class PermissionPolicy:
 
     def check(self, tool: Tool, args: dict, ctx: ToolContext) -> Decision:
         if tool.name == "bash":
-            return self.check_bash(args.get("command", ""))
+            from hx.tools.shell import sandboxed  # local import: hx.tools imports this module
+
+            in_sandbox = sandboxed(ctx, args)
+            decision = self.check_bash(args.get("command", ""), in_sandbox)
+            if args.get("sandbox") is False and decision.action != DENY and decision.reason != "allowed by rule":
+                return Decision(ASK, "wants to run OUTSIDE the sandbox: network access, writes anywhere")
+            return decision
         return self.check_path_tool(tool, args, ctx)
 
-    def check_bash(self, command: str) -> Decision:
+    def check_bash(self, command: str, in_sandbox: bool = False) -> Decision:
         parts = split_commands(command) or [command]
 
         for part in [command, *parts]:
@@ -243,6 +249,8 @@ class PermissionPolicy:
             return Decision(DENY, "read-only mode: only read-only commands may run")
         if self.mode == "full-auto":
             return Decision(ALLOW, "full-auto mode")
+        if self.mode == "auto-edit" and in_sandbox:
+            return Decision(ALLOW, "auto-edit mode, sandboxed")
         return Decision(ASK, "runs a command")
 
     def check_path_tool(self, tool: Tool, args: dict, ctx: ToolContext) -> Decision:

@@ -1,9 +1,11 @@
-// Unit tests for OutputCapture. (Process behavior is tested from Python: tests/test_bash.py.)
+// Unit tests for OutputCapture and the sandbox profile builder.
+// (Process and sandbox behavior is tested end to end from Python: tests/test_bash.py, tests/test_sandbox.py.)
 
 #include <iostream>
 #include <string>
 
 #include "capture.hpp"
+#include "sandbox.hpp"
 
 static int failures = 0;
 
@@ -15,7 +17,29 @@ static int failures = 0;
         }                                                                            \
     } while (0)
 
+static bool has(const std::string& s, const std::string& sub) { return s.find(sub) != std::string::npos; }
+
+static void test_profile() {
+    hx::SandboxOptions o;
+    o.writable = {"/work/my proj", "/private/tmp"};
+    o.deny_read = {"/Users/me/.ssh"};
+    std::string p = hx::build_profile(o);
+    CHECK(has(p, "(deny default)"));
+    CHECK(has(p, "(subpath \"/work/my proj\")"));
+    CHECK(has(p, "(subpath \"/private/tmp\")"));
+    CHECK(has(p, "(allow network* (local unix))"));      // no internet by default
+    CHECK(!has(p, "(allow network*)\n"));
+    CHECK(p.rfind("(deny file-read* (subpath \"/Users/me/.ssh\"))") > p.find("(allow file-read*)"));  // deny comes later, so it wins
+
+    o.allow_network = true;
+    CHECK(has(hx::build_profile(o), "(allow network*)\n"));
+
+    o.writable = {"/tmp/we\"ird"};
+    CHECK(has(hx::build_profile(o), "(subpath \"/tmp/we\\\"ird\")"));  // quotes escaped
+}
+
 int main() {
+    test_profile();
     {  // fits: kept whole
         hx::OutputCapture c(100);
         c.append("hello\n", 6);

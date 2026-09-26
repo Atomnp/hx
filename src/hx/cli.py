@@ -10,6 +10,7 @@ from hx.events import Event, Notice, StepFinished, TextDelta, ToolFinished, Tool
 from hx.models import ModelError
 from hx.models.ollama import OllamaClient
 from hx.permissions import MODES, Approval, Decision, load_policy
+from hx.sandbox import load_sandbox
 from hx.tools import Tool, ToolContext
 from hx.tools.builtin import default_tools
 
@@ -19,6 +20,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=f"hx {__version__}")
     parser.add_argument("--model", help="Ollama model name (default: $HX_MODEL or qwen3:14b)")
     parser.add_argument("--mode", choices=MODES, help="permission mode (default: from .hx/settings.json, else ask)")
+    parser.add_argument("--no-sandbox", action="store_true", help="run shell commands without the OS sandbox")
     return parser
 
 
@@ -55,7 +57,8 @@ def print_event(event: Event) -> None:
 
 def repl(agent: Agent) -> None:
     mode = agent.ctx.permissions.mode if agent.ctx.permissions else "none"
-    print(f"hx {__version__} · {agent.model.name} · permissions: {mode} · /exit to quit")
+    sandbox = "on" if agent.ctx.sandbox and agent.ctx.sandbox.enabled else "off"
+    print(f"hx {__version__} · {agent.model.name} · permissions: {mode} · sandbox: {sandbox} · /exit to quit")
     while True:
         try:
             text = input("\n› ").strip()
@@ -80,5 +83,6 @@ def main(argv: list[str] | None = None) -> int:
     ctx = ToolContext()
     ctx.permissions = load_policy(ctx.cwd, args.mode)
     ctx.approve = ask_user
+    ctx.sandbox = load_sandbox(ctx.cwd, enabled=False if args.no_sandbox else None)
     repl(Agent(OllamaClient(settings), tools=default_tools(), ctx=ctx))
     return 0
