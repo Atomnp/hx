@@ -5,6 +5,7 @@ import sys
 
 from hx import __version__
 from hx.agent import Agent
+from hx.checkpoints import CheckpointError, checkpoints_for
 from hx.config import Settings
 from hx.events import Event, Notice, StepFinished, TextDelta, ToolFinished, ToolStarted
 from hx.models import ModelError
@@ -21,6 +22,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--model", help="Ollama model name (default: $HX_MODEL or qwen3:14b)")
     parser.add_argument("--mode", choices=MODES, help="permission mode (default: from .hx/settings.json, else ask)")
     parser.add_argument("--no-sandbox", action="store_true", help="run shell commands without the OS sandbox")
+    parser.add_argument("--no-checkpoints", action="store_true", help="don't snapshot the workspace before each turn")
     return parser
 
 
@@ -58,7 +60,8 @@ def print_event(event: Event) -> None:
 def repl(agent: Agent) -> None:
     mode = agent.ctx.permissions.mode if agent.ctx.permissions else "none"
     sandbox = "on" if agent.ctx.sandbox and agent.ctx.sandbox.enabled else "off"
-    print(f"hx {__version__} · {agent.model.name} · permissions: {mode} · sandbox: {sandbox} · /exit to quit")
+    print(f"hx {__version__} · {agent.model.name} · permissions: {mode} · sandbox: {sandbox}")
+    print("commands: /undo  /checkpoints  /exit")
     while True:
         try:
             text = input("\n› ").strip()
@@ -69,6 +72,18 @@ def repl(agent: Agent) -> None:
             continue
         if text in ("/exit", "/quit"):
             return
+        if text == "/undo":
+            try:
+                print(agent.undo())
+            except CheckpointError as e:
+                print(f"[undo failed] {e}", file=sys.stderr)
+            continue
+        if text == "/checkpoints":
+            if not agent.checkpoints:
+                print("Checkpoints are off.")
+            for c in agent.checkpoints.list() if agent.checkpoints else []:
+                print(f"  {c.sha[:8]}  {c.age:>16}  {c.label}")
+            continue
         try:
             agent.run(text, on_event=print_event)
         except ModelError as e:
@@ -84,5 +99,6 @@ def main(argv: list[str] | None = None) -> int:
     ctx.permissions = load_policy(ctx.cwd, args.mode)
     ctx.approve = ask_user
     ctx.sandbox = load_sandbox(ctx.cwd, enabled=False if args.no_sandbox else None)
-    repl(Agent(OllamaClient(settings), tools=default_tools(), ctx=ctx))
+    checkpoints = None if args.no_checkpoints else checkpoints_for(ctx.cwd)
+    repl(Agent(OllamaClient(settings), tools=default_tools(), ctx=ctx, checkpoints=checkpoints))
     return 0
