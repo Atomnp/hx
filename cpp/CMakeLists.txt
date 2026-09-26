@@ -18,4 +18,9 @@ add_compile_options(-Wall -Wextra -Wpedantic)
 find_package(Threads REQUIRED)
 enable_testing()
 
+# Header-only helpers shared by the tools.
+add_library(hx_common INTERFACE)
+target_include_directories(hx_common INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/common)
+
 add_subdirectory(search)
+add_subdirectory(exec)

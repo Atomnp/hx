@@ -14,7 +14,6 @@
 #include <algorithm>
 #include <atomic>
 #include <cctype>
-#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
@@ -27,6 +26,7 @@
 
 #include "glob.hpp"
 #include "ignore.hpp"
+#include "json.hpp"
 #include "literal.hpp"
 
 namespace fs = std::filesystem;
@@ -263,29 +263,6 @@ struct Match {
 
 // ---------------------------------------------------------------- output
 
-std::string json_escape(std::string_view s) {
-    std::string out;
-    out.reserve(s.size() + 8);
-    for (unsigned char c : s) {
-        switch (c) {
-            case '"': out += "\\\""; break;
-            case '\\': out += "\\\\"; break;
-            case '\n': out += "\\n"; break;
-            case '\r': out += "\\r"; break;
-            case '\t': out += "\\t"; break;
-            default:
-                if (c < 0x20) {
-                    char buf[8];
-                    std::snprintf(buf, sizeof buf, "\\u%04x", c);
-                    out += buf;
-                } else {
-                    out += static_cast<char>(c);
-                }
-        }
-    }
-    return out;
-}
-
 std::string clip(std::string_view line) {
     if (line.size() <= kMaxLineChars) return std::string(line);
     return std::string(line.substr(0, kMaxLineChars)) + "...";
@@ -296,7 +273,7 @@ std::string clip(std::string_view line) {
 int run_files(const Options& o, const std::vector<FileEntry>& files) {
     size_t shown = std::min(files.size(), o.max);
     for (size_t i = 0; i < shown; ++i) {
-        if (o.json) std::cout << "{\"path\":\"" << json_escape(files[i].display) << "\"}\n";
+        if (o.json) std::cout << "{\"path\":\"" << hx::json_escape(files[i].display) << "\"}\n";
         else std::cout << files[i].display << "\n";
     }
     if (o.json) {
@@ -353,8 +330,8 @@ int run_grep(const Options& o, const std::vector<FileEntry>& files) {
         for (const auto& m : results[i]) {
             if (printed++ >= o.max) break;
             if (o.json) {
-                std::cout << "{\"path\":\"" << json_escape(files[i].display) << "\",\"line\":" << m.line
-                          << ",\"text\":\"" << json_escape(m.text) << "\"}\n";
+                std::cout << "{\"path\":\"" << hx::json_escape(files[i].display) << "\",\"line\":" << m.line
+                          << ",\"text\":\"" << hx::json_escape(m.text) << "\"}\n";
             } else {
                 std::cout << files[i].display << ":" << m.line << ":" << m.text << "\n";
             }
