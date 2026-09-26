@@ -36,6 +36,7 @@ def is_binary(path: Path) -> bool:
 
 
 class ReadFile(Tool):
+    subject_arg = "path"
     name = "read_file"
     description = (
         "Read a text file. Returns lines prefixed with their line numbers (1-based). "
@@ -86,6 +87,7 @@ class ReadFile(Tool):
 
 
 class ListDir(Tool):
+    subject_arg = "path"
     name = "list_dir"
     description = (
         "List a directory as an indented tree (directories end with /, files show their size). "
@@ -94,7 +96,7 @@ class ListDir(Tool):
     parameters = {
         "type": "object",
         "properties": {
-            "path": {"type": "string", "description": "Directory to list (default: the workspace)"},
+            "path": {"type": "string", "description": "Directory to list. Omit to list the workspace root."},
             "depth": {"type": "integer", "description": "How many levels deep to go (default 2)"},
         },
         "additionalProperties": False,

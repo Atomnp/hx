@@ -5,6 +5,7 @@ from typing import Any
 from hx.messages import ToolCall
 from hx.repair import find_placeholders, repair_arguments
 from hx.tools.base import Tool, ToolContext, ToolResult
+from hx.permissions import ALLOW, DENY, suggest_rule
 from hx.tools.schema import validate
 
 
@@ -46,6 +47,9 @@ class ToolRegistry:
         if problems:
             return ToolResult(f"Error: invalid arguments for {call.name}:\n- " + "\n- ".join(problems), True, notes)
 
+        if refusal := self.check_permission(tool, args, ctx):
+            return refusal
+
         try:
             result = tool.run(args, ctx)
         except Exception as e:  # a buggy tool must never crash the agent
@@ -55,3 +59,27 @@ class ToolRegistry:
             result.notes = notes
             result.content += f"\n[harness: fixed your arguments: {'; '.join(notes)}]"
         return result
+
+    @staticmethod
+    def check_permission(tool: Tool, args: dict, ctx: ToolContext) -> ToolResult | None:
+        """None if the call may run; otherwise the refusal to send back to the model."""
+        if ctx.permissions is None:
+            return None
+        decision = ctx.permissions.check(tool, args, ctx)
+        if decision.action == ALLOW:
+            return None
+        if decision.action == DENY:
+            return ToolResult(f"Permission denied: {decision.reason}. Don't retry this; find another way or ask the user.", True)
+
+        # ASK
+        if ctx.approve is None:
+            return ToolResult(f"Permission required ({decision.reason}) but there's no one to approve it in this session.", True)
+        rule = suggest_rule(tool, args, ctx)
+        answer = ctx.approve(tool, args, decision, rule)
+        if not answer.allowed:
+            msg = "The user declined this action."
+            msg += f" Their instructions: {answer.feedback}" if answer.feedback else " Ask them how they'd like to proceed."
+            return ToolResult(msg, True)
+        if answer.remember:
+            ctx.permissions.add_allow(rule)
+        return None

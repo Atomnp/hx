@@ -34,6 +34,7 @@ def diff(before: str, after: str, path: Path) -> str:
 
 
 class WriteFile(Tool):
+    subject_arg = "path"
     name = "write_file"
     description = (
         "Create a new file, or completely replace an existing one, with the given content. "
@@ -103,6 +104,7 @@ def line_of(text: str, index: int) -> int:
 
 
 class EditFile(Tool):
+    subject_arg = "path"
     name = "edit_file"
     description = (
         "Replace an exact piece of text in a file. old_string must match the file exactly (including indentation) "

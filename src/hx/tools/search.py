@@ -77,6 +77,7 @@ def display_root(ctx: ToolContext, path: str) -> tuple[Path, str]:
 
 
 class Grep(Tool):
+    subject_arg = "path"
     name = "grep"
     description = (
         "Search file contents with a regular expression (ECMAScript/Python-style syntax). "
@@ -88,7 +89,7 @@ class Grep(Tool):
         "type": "object",
         "properties": {
             "pattern": {"type": "string", "description": "Regex to search for, e.g. 'def \\w+_tool' or 'TODO'"},
-            "path": {"type": "string", "description": "File or directory to search (default: workspace)"},
+            "path": {"type": "string", "description": "File or directory to search. Omit to search the whole workspace."},
             "glob": {"type": "string", "description": "Only search files matching this glob"},
             "ignore_case": {"type": "boolean", "description": "Case-insensitive match (default false)"},
             "max_results": {"type": "integer", "description": f"Max matching lines (default {DEFAULT_MAX})"},
@@ -130,6 +131,7 @@ class Grep(Tool):
 
 
 class Glob(Tool):
+    subject_arg = "path"
     name = "glob"
     description = (
         "Find files by name pattern, e.g. '**/*.py', 'tests/test_*.py', '*.md'. "
@@ -139,7 +141,7 @@ class Glob(Tool):
         "type": "object",
         "properties": {
             "pattern": {"type": "string", "description": "Glob pattern"},
-            "path": {"type": "string", "description": "Directory to search (default: workspace)"},
+            "path": {"type": "string", "description": "Directory to search. Omit to search the whole workspace."},
         },
         "required": ["pattern"],
         "additionalProperties": False,

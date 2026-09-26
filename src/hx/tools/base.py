@@ -2,7 +2,10 @@
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from hx.permissions import Approver, PermissionPolicy
 
 
 @dataclass
@@ -20,6 +23,9 @@ class ToolContext:
     # Files the model has read this session -> their mtime when read. Edit tools require an entry (read
     # before you modify) and an unchanged mtime (nobody changed it since). See tools/fs_edit.py.
     read_files: dict[str, int] = field(default_factory=dict)
+    # Permission checks. None = no checks (used by unit tests of individual tools).
+    permissions: "PermissionPolicy | None" = None
+    approve: "Approver | None" = None  # asks the user; None = nobody to ask, so "ask" becomes "deny"
 
 
 class Tool:
@@ -28,6 +34,14 @@ class Tool:
     parameters: dict[str, Any] = {"type": "object", "properties": {}}
     # True if the tool can't change anything. Permissions let read-only tools run without asking.
     read_only: bool = False
+    # The argument permission rules match against: a path ("path") or a shell command ("command").
+    subject_arg: str | None = None
+
+    def subject(self, args: dict[str, Any]) -> str | None:
+        """What this call acts on, for permission rules. Path-like tools default to the workspace."""
+        if self.subject_arg is None:
+            return None
+        return args.get(self.subject_arg, ".")
 
     def run(self, args: dict[str, Any], ctx: ToolContext) -> ToolResult:
         raise NotImplementedError

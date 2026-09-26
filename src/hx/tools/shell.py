@@ -107,6 +107,7 @@ def format_result(r: dict, timeout: int) -> ToolResult:
 
 class Bash(Tool):
     name = "bash"
+    subject_arg = "command"
     description = (
         "Run a bash command in the workspace directory and return its combined stdout/stderr and exit code. "
         "Use it to run tests, builds, git, and other CLI tools. Each call starts a fresh shell in the workspace "

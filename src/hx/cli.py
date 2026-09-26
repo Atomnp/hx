@@ -9,6 +9,8 @@ from hx.config import Settings
 from hx.events import Event, Notice, StepFinished, TextDelta, ToolFinished, ToolStarted
 from hx.models import ModelError
 from hx.models.ollama import OllamaClient
+from hx.permissions import MODES, Approval, Decision, load_policy
+from hx.tools import Tool, ToolContext
 from hx.tools.builtin import default_tools
 
 
@@ -16,7 +18,24 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="hx", description="A coding-agent harness.")
     parser.add_argument("--version", action="version", version=f"hx {__version__}")
     parser.add_argument("--model", help="Ollama model name (default: $HX_MODEL or qwen3:14b)")
+    parser.add_argument("--mode", choices=MODES, help="permission mode (default: from .hx/settings.json, else ask)")
     return parser
+
+
+def ask_user(tool: Tool, args: dict, decision: Decision, rule: str) -> Approval:
+    """Terminal approval prompt. 'n <text>' denies with instructions the model will see."""
+    subject = args.get("command") or args.get("path") or ""
+    print(f"\n  ⚠ {tool.name}: {subject}\n    ({decision.reason})")
+    try:
+        answer = input(f"    allow? [y]es / [n]o (+ instructions) / [a]lways {rule} › ").strip()
+    except (EOFError, KeyboardInterrupt):
+        return Approval(False)
+    if answer.lower() in ("y", "yes"):
+        return Approval(True)
+    if answer.lower() in ("a", "always"):
+        return Approval(True, remember=True)
+    feedback = answer[1:].strip(" :-") if answer[:1].lower() == "n" else answer
+    return Approval(False, feedback=feedback)
 
 
 def print_event(event: Event) -> None:
@@ -35,7 +54,8 @@ def print_event(event: Event) -> None:
 
 
 def repl(agent: Agent) -> None:
-    print(f"hx {__version__} · {agent.model.name} · /exit to quit")
+    mode = agent.ctx.permissions.mode if agent.ctx.permissions else "none"
+    print(f"hx {__version__} · {agent.model.name} · permissions: {mode} · /exit to quit")
     while True:
         try:
             text = input("\n› ").strip()
@@ -57,5 +77,8 @@ def main(argv: list[str] | None = None) -> int:
     settings = Settings.from_env()
     if args.model:
         settings.model = args.model
-    repl(Agent(OllamaClient(settings), tools=default_tools()))
+    ctx = ToolContext()
+    ctx.permissions = load_policy(ctx.cwd, args.mode)
+    ctx.approve = ask_user
+    repl(Agent(OllamaClient(settings), tools=default_tools(), ctx=ctx))
     return 0
