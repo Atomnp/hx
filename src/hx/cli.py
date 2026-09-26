@@ -11,6 +11,7 @@ from hx.events import Event, Notice, StepFinished, TextDelta, ToolFinished, Tool
 from hx.models import ModelError
 from hx.models.ollama import OllamaClient
 from hx.permissions import MODES, Approval, Decision, load_policy
+from hx.prompt import build_system_prompt
 from hx.sandbox import load_sandbox
 from hx.tools import Tool, ToolContext
 from hx.tools.builtin import default_tools
@@ -100,5 +101,12 @@ def main(argv: list[str] | None = None) -> int:
     ctx.approve = ask_user
     ctx.sandbox = load_sandbox(ctx.cwd, enabled=False if args.no_sandbox else None)
     checkpoints = None if args.no_checkpoints else checkpoints_for(ctx.cwd)
-    repl(Agent(OllamaClient(settings), tools=default_tools(), ctx=ctx, checkpoints=checkpoints))
+    agent = Agent(
+        OllamaClient(settings),
+        tools=default_tools(),
+        ctx=ctx,
+        system_prompt=build_system_prompt(ctx),
+        checkpoints=checkpoints,
+    )
+    repl(agent)
     return 0
