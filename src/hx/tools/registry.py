@@ -3,6 +3,7 @@
 from typing import Any
 
 from hx.messages import ToolCall
+from hx.repair import find_placeholders, repair_arguments
 from hx.tools.base import Tool, ToolContext, ToolResult
 from hx.tools.schema import validate
 
@@ -32,11 +33,25 @@ class ToolRegistry:
         if tool is None:
             return ToolResult(f"Error: unknown tool '{call.name}'. Available tools: {', '.join(self._tools) or 'none'}", True)
 
-        problems = validate(call.arguments, tool.parameters)
+        args, notes = repair_arguments(call.arguments, tool.parameters)
+
+        if placeholders := find_placeholders(args):
+            return ToolResult(
+                f"Error: these arguments look like unfilled placeholders: {', '.join(placeholders)}. "
+                "Use real values; look them up with the tools first if you don't know them.",
+                True,
+            )
+
+        problems = validate(args, tool.parameters)
         if problems:
-            return ToolResult(f"Error: invalid arguments for {call.name}:\n- " + "\n- ".join(problems), True)
+            return ToolResult(f"Error: invalid arguments for {call.name}:\n- " + "\n- ".join(problems), True, notes)
 
         try:
-            return tool.run(call.arguments, ctx)
+            result = tool.run(args, ctx)
         except Exception as e:  # a buggy tool must never crash the agent
-            return ToolResult(f"Error: {call.name} failed: {type(e).__name__}: {e}", True)
+            result = ToolResult(f"Error: {call.name} failed: {type(e).__name__}: {e}", True)
+        if notes:
+            # Tell the model what we fixed, so it can send correct arguments next time.
+            result.notes = notes
+            result.content += f"\n[harness: fixed your arguments: {'; '.join(notes)}]"
+        return result

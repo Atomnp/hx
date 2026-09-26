@@ -47,7 +47,7 @@ def test_unknown_tool_lists_available_ones():
 
 
 def test_invalid_arguments_are_explained():
-    r = run(ToolRegistry([Add()]), "add", a="2", c=1)
+    r = run(ToolRegistry([Add()]), "add", a="two", c=1)  # "two" can't be repaired into an integer
     assert r.is_error
     assert "a: expected integer" in r.content
     assert "b: required field missing" in r.content

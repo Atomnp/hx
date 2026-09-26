@@ -6,7 +6,7 @@ import sys
 from hx import __version__
 from hx.agent import Agent
 from hx.config import Settings
-from hx.events import Event, StepFinished, TextDelta, ToolFinished, ToolStarted
+from hx.events import Event, Notice, StepFinished, TextDelta, ToolFinished, ToolStarted
 from hx.models import ModelError
 from hx.models.ollama import OllamaClient
 from hx.tools.builtin import default_tools
@@ -27,6 +27,8 @@ def print_event(event: Event) -> None:
     elif isinstance(event, ToolFinished):
         mark = "✗" if event.is_error else "✓"
         print(f"  {mark} {event.result[:200]}", flush=True)
+    elif isinstance(event, Notice):
+        print(f"  [hx] {event.text}", file=sys.stderr, flush=True)
     elif isinstance(event, StepFinished):
         u = event.usage
         print(f"\n  [{u.prompt_tokens} in / {u.completion_tokens} out, {u.duration_s:.1f}s]", file=sys.stderr, flush=True)

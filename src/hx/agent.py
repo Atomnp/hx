@@ -2,6 +2,7 @@
 
 from hx.events import (
     EventHandler,
+    Notice,
     StepFinished,
     TextDelta,
     ToolFinished,
@@ -11,6 +12,7 @@ from hx.events import (
 )
 from hx.messages import Message, ToolCall, system, tool_result, user
 from hx.models.base import ModelClient
+from hx.repair import LoopGuard, extract_text_tool_calls
 from hx.tools import ToolContext, ToolRegistry
 
 DEFAULT_SYSTEM_PROMPT = "You are hx, a helpful coding assistant running in the user's terminal. Be concise."
@@ -34,6 +36,7 @@ class Agent:
     def run(self, text: str, on_event: EventHandler = ignore) -> str:
         """Handle one user request, calling the model (and tools) as many times as needed."""
         self.messages.append(user(text))
+        guard = LoopGuard()
 
         for step in range(1, self.max_steps + 1):
             response = self.model.chat(
@@ -41,16 +44,26 @@ class Agent:
                 tools=self.tools.schemas() or None,
                 on_text=lambda t: on_event(TextDelta(t)),
             )
-            self.messages.append(response.message)
+            message = response.message
+            if not message.tool_calls and self.tools.names():
+                # Some models write tool calls as text instead of using the tool-call channel.
+                calls, rest = extract_text_tool_calls(message.content, set(self.tools.names()))
+                if calls:
+                    message.tool_calls, message.content = calls, rest
+                    on_event(Notice(f"parsed {len(calls)} tool call(s) the model wrote as text"))
+            self.messages.append(message)
             on_event(StepFinished(step, response.usage))
 
-            if not response.message.tool_calls:
-                on_event(TurnFinished(response.message.content, step, "done"))
-                return response.message.content
+            if not message.tool_calls:
+                on_event(TurnFinished(message.content, step, "done"))
+                return message.content
 
-            for call in response.message.tool_calls:
+            for call in message.tool_calls:
                 on_event(ToolStarted(call))
                 result, is_error = self.run_tool(call)
+                if warning := guard.check(call):
+                    result += f"\n[harness: {warning}]"
+                    on_event(Notice(f"repeated call detected: {call.name}"))
                 self.messages.append(tool_result(call, result))
                 on_event(ToolFinished(call, result, is_error))
 

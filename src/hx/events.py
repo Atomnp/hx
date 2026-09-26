@@ -35,6 +35,13 @@ class StepFinished:
 
 
 @dataclass
+class Notice:
+    """Something the harness did on its own that the user should know about (a repair, a warning...)."""
+
+    text: str
+
+
+@dataclass
 class TurnFinished:
     """The agent is done with the user's request."""
 
@@ -43,7 +50,7 @@ class TurnFinished:
     reason: str  # "done" | "max_steps"
 
 
-Event = Union[TextDelta, ToolStarted, ToolFinished, StepFinished, TurnFinished]
+Event = Union[TextDelta, ToolStarted, ToolFinished, StepFinished, Notice, TurnFinished]
 EventHandler = Callable[[Event], None]
 
 

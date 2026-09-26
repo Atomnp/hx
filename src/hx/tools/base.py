@@ -9,6 +9,7 @@ from typing import Any
 class ToolResult:
     content: str
     is_error: bool = False
+    notes: list[str] = field(default_factory=list)  # repairs the harness applied to the call
 
 
 @dataclass
