@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 
 from hx import __version__
-from hx.agent import Agent
+from hx.agent import Agent, make_child_agent
 from hx.checkpoints import CheckpointError, checkpoints_for
 from hx.context import ContextManager
 from hx.config import Settings
@@ -15,6 +15,7 @@ from hx.models.ollama import OllamaClient
 from hx.permissions import MODES, Approval, Decision, load_policy
 from hx.prompt import build_system_prompt
 from hx.session import Session, find_session, list_sessions
+from hx.subagents import Task, load_specs
 from hx.sandbox import load_sandbox
 from hx.tools import Tool, ToolContext
 from hx.tools.builtin import default_tools
@@ -121,9 +122,12 @@ def main(argv: list[str] | None = None) -> int:
     ctx.sandbox = load_sandbox(ctx.cwd, enabled=False if args.no_sandbox else None)
     checkpoints = None if args.no_checkpoints else checkpoints_for(ctx.cwd)
     system_prompt = build_system_prompt(ctx)
+    model = OllamaClient(settings)
+    tools = default_tools()
+    tools.register(Task(load_specs(ctx.cwd), tools, model, make_child_agent))
     agent = Agent(
-        OllamaClient(settings),
-        tools=default_tools(),
+        model,
+        tools=tools,
         ctx=ctx,
         system_prompt=system_prompt,
         checkpoints=checkpoints,

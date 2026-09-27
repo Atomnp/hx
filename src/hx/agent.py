@@ -75,6 +75,7 @@ class Agent:
 
     def run(self, text: str, on_event: EventHandler = ignore) -> str:
         """Handle one user request, calling the model (and tools) as many times as needed."""
+        self.ctx.on_event = on_event
         turn = (self.take_snapshot(f"before turn {len(self.turns) + 1}: {text[:60]}", on_event), len(self.messages))
         self.turns.append(turn)
         if self.session:
@@ -204,3 +205,10 @@ def last_todos(messages: list[Message]) -> list[dict]:
             if c.name == "todo_write" and isinstance(c.arguments.get("todos"), list):
                 return c.arguments["todos"]
     return []
+
+
+def make_child_agent(model, tools, ctx, instructions, max_steps):
+    """Factory for subagents (hx.subagents.Task): a plain Agent, no checkpoints/session of its own."""
+    from hx.prompt import environment
+
+    return Agent(model, tools=tools, ctx=ctx, system_prompt=f"{instructions}\n\n{environment(ctx)}", max_steps=max_steps)

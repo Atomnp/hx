@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
 if TYPE_CHECKING:
     from hx.permissions import Approver, PermissionPolicy
@@ -29,6 +29,8 @@ class ToolContext:
     approve: "Approver | None" = None  # asks the user; None = nobody to ask, so "ask" becomes "deny"
     sandbox: "SandboxConfig | None" = None  # OS sandbox for shell commands; None = off
     todos: list[dict] = field(default_factory=list)  # the agent's current plan (todo_write)
+    # The running agent's event handler, so tools that do long work (subagents) can report progress.
+    on_event: Callable[[Any], None] | None = None
 
 
 class Tool:
