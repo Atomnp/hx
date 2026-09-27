@@ -47,6 +47,12 @@ class ToolRegistry:
         if problems:
             return ToolResult(f"Error: invalid arguments for {call.name}:\n- " + "\n- ".join(problems), True, notes)
 
+        if ctx.hooks:  # PreToolUse: your hooks can veto a call before permissions are even asked
+            pre = ctx.hooks.run("PreToolUse", {"tool": call.name, "arguments": args}, call.name)
+            self.report_hook_errors(pre, ctx)
+            if pre.blocked:
+                return ToolResult(f"Blocked by a PreToolUse hook: {pre.feedback or 'no reason given'}", True)
+
         if refusal := self.check_permission(tool, args, ctx):
             return refusal
 
@@ -54,6 +60,15 @@ class ToolRegistry:
             result = tool.run(args, ctx)
         except Exception as e:  # a buggy tool must never crash the agent
             result = ToolResult(f"Error: {call.name} failed: {type(e).__name__}: {e}", True)
+
+        if ctx.hooks:  # PostToolUse: formatters, linters, extra checks; their output goes back to the model
+            post = ctx.hooks.run("PostToolUse", {"tool": call.name, "arguments": args, "result": result.content,
+                                                 "is_error": result.is_error}, call.name)
+            self.report_hook_errors(post, ctx)
+            if post.output:
+                result.content += f"\n[PostToolUse hook]\n{post.output}"
+            if post.blocked:
+                result.content += f"\n[PostToolUse hook feedback]\n{post.feedback}"
         if notes:
             # Tell the model what we fixed, so it can send correct arguments next time.
             result.notes = notes
@@ -83,3 +98,11 @@ class ToolRegistry:
         if answer.remember:
             ctx.permissions.add_allow(rule)
         return None
+
+    @staticmethod
+    def report_hook_errors(outcome, ctx: ToolContext) -> None:
+        if outcome.errors and ctx.on_event:
+            from hx.events import Notice
+
+            for err in outcome.errors:
+                ctx.on_event(Notice(err))

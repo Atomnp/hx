@@ -46,6 +46,9 @@ class Agent:
         # The length becomes None after compaction: those messages no longer exist individually.
         self.turns: list[tuple[str | None, int | None]] = []
         self.session = session  # where the conversation is recorded; None = not recorded
+        # UserPromptSubmit/Stop hooks fire for the user's own turns, not for subagents' delegated tasks.
+        # (Tool hooks still apply to subagents: they run inside the tool registry.)
+        self.lifecycle_hooks = True
         if session:
             session.message(self.messages[0])
 
@@ -76,6 +79,16 @@ class Agent:
     def run(self, text: str, on_event: EventHandler = ignore) -> str:
         """Handle one user request, calling the model (and tools) as many times as needed."""
         self.ctx.on_event = on_event
+        hooks = self.ctx.hooks if self.lifecycle_hooks else None
+        if hooks:
+            submit = hooks.run("UserPromptSubmit", {"prompt": text})
+            for err in submit.errors:
+                on_event(Notice(err))
+            if submit.blocked:
+                on_event(Notice(f"your message was blocked by a UserPromptSubmit hook: {submit.feedback}"))
+                return ""
+            if submit.output:
+                text += f"\n\n<system-reminder>Context from a UserPromptSubmit hook:\n{submit.output}</system-reminder>"
         turn = (self.take_snapshot(f"before turn {len(self.turns) + 1}: {text[:60]}", on_event), len(self.messages))
         self.turns.append(turn)
         if self.session:
@@ -83,6 +96,7 @@ class Agent:
         self.add(user(text))
         guard = LoopGuard()
         reminded = False
+        stop_hook_runs = 0
 
         self.context.set_tools(self.tools.schemas())
         for step in range(1, self.max_steps + 1):
@@ -115,6 +129,17 @@ class Agent:
                         "or remove ones that no longer apply) and explain why.</system-reminder>"
                     ))
                     continue
+                if hooks and stop_hook_runs < 3:
+                    # Stop hook: e.g. "run the tests; if they fail, exit 2 with the failures". Capped at 3 so a
+                    # hook that always objects can't keep the agent running forever.
+                    stop = hooks.run("Stop", {"final_message": message.content, "stop_hook_active": stop_hook_runs > 0})
+                    for err in stop.errors:
+                        on_event(Notice(err))
+                    if stop.blocked:
+                        stop_hook_runs += 1
+                        on_event(Notice("a Stop hook asked the agent to keep working"))
+                        self.add(user(f"<system-reminder>A Stop hook objected:\n{stop.feedback}</system-reminder>"))
+                        continue
                 on_event(TurnFinished(message.content, step, "done"))
                 return message.content
 
@@ -211,4 +236,6 @@ def make_child_agent(model, tools, ctx, instructions, max_steps):
     """Factory for subagents (hx.subagents.Task): a plain Agent, no checkpoints/session of its own."""
     from hx.prompt import environment
 
-    return Agent(model, tools=tools, ctx=ctx, system_prompt=f"{instructions}\n\n{environment(ctx)}", max_steps=max_steps)
+    child = Agent(model, tools=tools, ctx=ctx, system_prompt=f"{instructions}\n\n{environment(ctx)}", max_steps=max_steps)
+    child.lifecycle_hooks = False
+    return child

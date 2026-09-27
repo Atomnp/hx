@@ -9,6 +9,7 @@ from hx.agent import Agent, make_child_agent
 from hx.checkpoints import CheckpointError, checkpoints_for
 from hx.context import ContextManager
 from hx.config import Settings
+from hx.hooks import load_hooks
 from hx.events import Event, Notice, StepFinished, TextDelta, ToolFinished, ToolStarted, TurnFinished
 from hx.models import ModelError
 from hx.models.ollama import OllamaClient
@@ -32,6 +33,17 @@ def build_parser() -> argparse.ArgumentParser:
                         help="continue a saved session (the latest one, or the given id / id prefix)")
     parser.add_argument("--sessions", action="store_true", help="list saved sessions for this workspace and exit")
     return parser
+
+
+def confirm_project_hooks(hooks) -> bool:
+    """Project hooks run with your permissions and came with the repo: show them and ask once."""
+    print("\n  ⚠ This project defines hooks (shell commands hx would run automatically):")
+    for h in hooks:
+        print(f"    {h.event}{f' [{h.matcher}]' if h.matcher else ''}: {h.command}")
+    try:
+        return input("    trust and run them? [y/N] › ").strip().lower() in ("y", "yes")
+    except (EOFError, KeyboardInterrupt):
+        return False
 
 
 def ask_user(tool: Tool, args: dict, decision: Decision, rule: str) -> Approval:
@@ -120,8 +132,15 @@ def main(argv: list[str] | None = None) -> int:
     ctx.permissions = load_policy(ctx.cwd, args.mode)
     ctx.approve = ask_user
     ctx.sandbox = load_sandbox(ctx.cwd, enabled=False if args.no_sandbox else None)
+    ctx.hooks, hook_notes = load_hooks(ctx.cwd, confirm=confirm_project_hooks)
+    for note in hook_notes:
+        print(f"[hx] {note}", file=sys.stderr)
     checkpoints = None if args.no_checkpoints else checkpoints_for(ctx.cwd)
     system_prompt = build_system_prompt(ctx)
+    if ctx.hooks:
+        start = ctx.hooks.run("SessionStart", {})
+        if start.output:
+            system_prompt += f"\n\n# Context from SessionStart hooks\n{start.output}"
     model = OllamaClient(settings)
     tools = default_tools()
     tools.register(Task(load_specs(ctx.cwd), tools, model, make_child_agent))
