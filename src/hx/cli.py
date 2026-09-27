@@ -2,6 +2,7 @@
 
 import argparse
 import sys
+from pathlib import Path
 
 from hx import __version__
 from hx.agent import Agent
@@ -13,6 +14,7 @@ from hx.models import ModelError
 from hx.models.ollama import OllamaClient
 from hx.permissions import MODES, Approval, Decision, load_policy
 from hx.prompt import build_system_prompt
+from hx.session import Session, find_session, list_sessions
 from hx.sandbox import load_sandbox
 from hx.tools import Tool, ToolContext
 from hx.tools.builtin import default_tools
@@ -25,6 +27,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--mode", choices=MODES, help="permission mode (default: from .hx/settings.json, else ask)")
     parser.add_argument("--no-sandbox", action="store_true", help="run shell commands without the OS sandbox")
     parser.add_argument("--no-checkpoints", action="store_true", help="don't snapshot the workspace before each turn")
+    parser.add_argument("--resume", nargs="?", const="latest", metavar="ID",
+                        help="continue a saved session (the latest one, or the given id / id prefix)")
+    parser.add_argument("--sessions", action="store_true", help="list saved sessions for this workspace and exit")
     return parser
 
 
@@ -98,6 +103,10 @@ def repl(agent: Agent) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.sessions:
+        for info in list_sessions(Path.cwd()):
+            print(f"  {info.id}  {info.created}  {info.messages:3} msgs  {info.title}")
+        return 0
     settings = Settings.from_env()
     if args.model:
         settings.model = args.model
@@ -106,13 +115,28 @@ def main(argv: list[str] | None = None) -> int:
     ctx.approve = ask_user
     ctx.sandbox = load_sandbox(ctx.cwd, enabled=False if args.no_sandbox else None)
     checkpoints = None if args.no_checkpoints else checkpoints_for(ctx.cwd)
+    system_prompt = build_system_prompt(ctx)
     agent = Agent(
         OllamaClient(settings),
         tools=default_tools(),
         ctx=ctx,
-        system_prompt=build_system_prompt(ctx),
+        system_prompt=system_prompt,
         checkpoints=checkpoints,
         context=ContextManager(window=settings.num_ctx),
     )
+    if args.resume:
+        saved = find_session(ctx.cwd, None if args.resume == "latest" else args.resume)
+        if saved is None:
+            print(f"No saved session matches {args.resume!r} here. Try: hx --sessions", file=sys.stderr)
+            return 1
+        turns = agent.resume(saved, system_prompt)
+        print(f"Resumed session {saved.id} ({turns} earlier request(s)).")
+        last_user = next((m.content for m in reversed(agent.messages) if m.role == "user"), "")
+        last_reply = next((m.content for m in reversed(agent.messages) if m.role == "assistant" and m.content), "")
+        if last_user:
+            print(f"  last request: {last_user[:120]}\n  last reply:   {last_reply[:120]}")
+    else:
+        agent.session = Session.create(ctx.cwd, settings.model)
+        agent.session.message(agent.messages[0])
     repl(agent)
     return 0

@@ -1,6 +1,6 @@
 """Conversation types (messages and tool calls) used across the harness."""
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
 
@@ -42,3 +42,20 @@ def user(text: str) -> Message:
 
 def tool_result(call: ToolCall, content: str) -> Message:
     return Message("tool", content, tool_call_id=call.id, name=call.name)
+
+
+def to_dict(m: Message) -> dict[str, Any]:
+    """JSON-friendly form, used by session files. Empty fields are left out to keep files small."""
+    return {k: v for k, v in asdict(m).items() if v not in ("", None, [])}
+
+
+def from_dict(d: dict[str, Any]) -> Message:
+    calls = [ToolCall(**c) for c in d.get("tool_calls", [])]
+    return Message(
+        role=d["role"],
+        content=d.get("content", ""),
+        tool_calls=calls,
+        tool_call_id=d.get("tool_call_id"),
+        name=d.get("name"),
+        thinking=d.get("thinking", ""),
+    )

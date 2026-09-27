@@ -16,6 +16,7 @@ from hx.events import (
 from hx.messages import Message, ToolCall, system, tool_result, user
 from hx.models.base import ModelClient
 from hx.repair import LoopGuard, extract_text_tool_calls
+from hx.session import Session
 from hx.tools import ToolContext, ToolRegistry
 
 DEFAULT_SYSTEM_PROMPT = "You are hx, a helpful coding assistant running in the user's terminal. Be concise."
@@ -31,6 +32,7 @@ class Agent:
         max_steps: int = 25,
         checkpoints: Checkpoints | None = None,
         context: ContextManager | None = None,
+        session: Session | None = None,
     ):
         self.model = model
         self.tools = tools or ToolRegistry()
@@ -42,11 +44,40 @@ class Agent:
         # One entry per turn: (snapshot taken before the turn, conversation length before the turn).
         # The length becomes None after compaction: those messages no longer exist individually.
         self.turns: list[tuple[str | None, int | None]] = []
+        self.session = session  # where the conversation is recorded; None = not recorded
+        if session:
+            session.message(self.messages[0])
+
+    # ---------------------------------------------------------------- recording
+
+    def add(self, m: Message) -> None:
+        """Every message enters the conversation through here, so the session log never misses one."""
+        self.messages.append(m)
+        if self.session:
+            self.session.message(m)
+
+    def rewrote_history(self) -> None:
+        """Called after compaction or undo: the log records the new full state."""
+        if self.session:
+            self.session.reset(self.messages, self.turns)
+
+    def resume(self, session: Session, system_prompt: str | None = None) -> int:
+        """Load a saved conversation into this agent and keep recording into the same file.
+        A fresh system prompt replaces the saved one: the environment (date, git status) may have changed."""
+        messages, turns = session.replay()
+        if system_prompt and messages and messages[0].role == "system":
+            messages[0] = system(system_prompt)
+        self.messages, self.turns, self.session = messages, turns, session
+        self.rewrote_history()
+        return sum(1 for m in messages if m.role == "user")
 
     def run(self, text: str, on_event: EventHandler = ignore) -> str:
         """Handle one user request, calling the model (and tools) as many times as needed."""
-        self.turns.append((self.take_snapshot(f"before turn {len(self.turns) + 1}: {text[:60]}", on_event), len(self.messages)))
-        self.messages.append(user(text))
+        turn = (self.take_snapshot(f"before turn {len(self.turns) + 1}: {text[:60]}", on_event), len(self.messages))
+        self.turns.append(turn)
+        if self.session:
+            self.session.turn(*turn)
+        self.add(user(text))
         guard = LoopGuard()
 
         self.context.set_tools(self.tools.schemas())
@@ -65,7 +96,7 @@ class Agent:
                 if calls:
                     message.tool_calls, message.content = calls, rest
                     on_event(Notice(f"parsed {len(calls)} tool call(s) the model wrote as text"))
-            self.messages.append(message)
+            self.add(message)
             on_event(StepFinished(step, response.usage, self.context.fraction_used(self.messages)))
 
             if not message.tool_calls:
@@ -79,7 +110,7 @@ class Agent:
                 if warning := guard.check(call):
                     result += f"\n[harness: {warning}]"
                     on_event(Notice(f"repeated call detected: {call.name}"))
-                self.messages.append(tool_result(call, result))
+                self.add(tool_result(call, result))
                 on_event(ToolFinished(call, result, is_error))
 
         on_event(TurnFinished("", self.max_steps, "max_steps"))
@@ -119,6 +150,7 @@ class Agent:
             return ""
         # Earlier turns can no longer be rewound message by message; undo will still restore their files.
         self.turns = [(sha, None) for sha, _ in self.turns]
+        self.rewrote_history()
         return f"compacted the conversation: ~{before} → ~{self.context.estimate(self.messages)} tokens"
 
     # ---------------------------------------------------------------- checkpoints
@@ -146,5 +178,6 @@ class Agent:
         else:  # compacted away: we can't cut the conversation, so tell the model instead
             self.messages.append(user("[The user ran /undo: the file changes from the last turn were reverted.]"))
             self.messages.append(Message("assistant", "Noted: the last turn's file changes were reverted."))
+        self.rewrote_history()
         self.ctx.read_files.clear()  # file contents changed under the model: it must re-read before editing
         return f"Undid the last turn.\n{summary or '(no file changes)'}"
