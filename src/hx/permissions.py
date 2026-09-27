@@ -265,7 +265,8 @@ class PermissionPolicy:
         sensitive = full is not None and is_sensitive(full, rel)
 
         if tool.read_only:
-            if allowed_by_rule or (inside and not sensitive):
+            in_read_root = full is not None and any(full.is_relative_to(r.resolve()) for r in ctx.read_roots)
+            if allowed_by_rule or ((inside or in_read_root) and not sensitive):
                 return Decision(ALLOW, "read-only tool")
             return Decision(ASK, "reads a sensitive file" if sensitive else f"reads outside the workspace ({full})")
 

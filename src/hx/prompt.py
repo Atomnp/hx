@@ -8,6 +8,7 @@ import subprocess
 from datetime import date
 from pathlib import Path
 
+from hx.skills import Skill, prompt_section
 from hx.tools.base import ToolContext
 
 INSTRUCTION_FILES = ("AGENTS.md", "CLAUDE.md")  # AGENTS.md is the cross-tool convention; CLAUDE.md as a fallback
@@ -109,8 +110,10 @@ def project_instructions(cwd: Path) -> str:
     return "# Project instructions\nThe user's instructions for this project. Follow them; later files override earlier ones.\n\n" + "\n\n".join(parts)
 
 
-def build_system_prompt(ctx: ToolContext) -> str:
+def build_system_prompt(ctx: ToolContext, skills: list[Skill] | None = None) -> str:
     sections = [BASE, environment(ctx)]
+    if skills_text := prompt_section(skills or []):
+        sections.append(skills_text)
     if instructions := project_instructions(ctx.cwd):
         sections.append(instructions)
     return "\n\n".join(sections)

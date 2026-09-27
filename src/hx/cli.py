@@ -16,6 +16,7 @@ from hx.models.ollama import OllamaClient
 from hx.permissions import MODES, Approval, Decision, load_policy
 from hx.prompt import build_system_prompt
 from hx.session import Session, find_session, list_sessions
+from hx.skills import SkillTool, discover
 from hx.subagents import Task, load_specs
 from hx.sandbox import load_sandbox
 from hx.tools import Tool, ToolContext
@@ -136,13 +137,17 @@ def main(argv: list[str] | None = None) -> int:
     for note in hook_notes:
         print(f"[hx] {note}", file=sys.stderr)
     checkpoints = None if args.no_checkpoints else checkpoints_for(ctx.cwd)
-    system_prompt = build_system_prompt(ctx)
+    skills = discover(ctx.cwd)
+    ctx.read_roots = [s.path for s in skills]
+    system_prompt = build_system_prompt(ctx, skills)
     if ctx.hooks:
         start = ctx.hooks.run("SessionStart", {})
         if start.output:
             system_prompt += f"\n\n# Context from SessionStart hooks\n{start.output}"
     model = OllamaClient(settings)
     tools = default_tools()
+    if skills:
+        tools.register(SkillTool(skills))
     tools.register(Task(load_specs(ctx.cwd), tools, model, make_child_agent))
     agent = Agent(
         model,

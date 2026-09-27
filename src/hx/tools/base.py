@@ -31,6 +31,8 @@ class ToolContext:
     sandbox: "SandboxConfig | None" = None  # OS sandbox for shell commands; None = off
     todos: list[dict] = field(default_factory=list)  # the agent's current plan (todo_write)
     hooks: "Hooks | None" = None  # user-defined lifecycle commands
+    # Extra folders the agent may READ without asking, e.g. skill folders in ~/.hx/skills.
+    read_roots: list[Path] = field(default_factory=list)
     # The running agent's event handler, so tools that do long work (subagents) can report progress.
     on_event: Callable[[Any], None] | None = None
 
