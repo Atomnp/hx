@@ -9,7 +9,7 @@ from hx.agent import Agent
 from hx.checkpoints import CheckpointError, checkpoints_for
 from hx.context import ContextManager
 from hx.config import Settings
-from hx.events import Event, Notice, StepFinished, TextDelta, ToolFinished, ToolStarted
+from hx.events import Event, Notice, StepFinished, TextDelta, ToolFinished, ToolStarted, TurnFinished
 from hx.models import ModelError
 from hx.models.ollama import OllamaClient
 from hx.permissions import MODES, Approval, Decision, load_policy
@@ -57,6 +57,11 @@ def print_event(event: Event) -> None:
     elif isinstance(event, ToolFinished):
         mark = "✗" if event.is_error else "✓"
         print(f"  {mark} {event.result[:200]}", flush=True)
+        warnings = [line for line in event.result[200:].splitlines() if line.startswith("⚠")]
+        for line in warnings:  # don't let a preview cut hide a warning the model received
+            print(f"  {line}", flush=True)
+    elif isinstance(event, TurnFinished) and event.reason == "max_steps":
+        print(f"\n  [hx] stopped after {event.steps} steps without finishing. Say 'continue' to keep going.", file=sys.stderr)
     elif isinstance(event, Notice):
         print(f"  [hx] {event.text}", file=sys.stderr, flush=True)
     elif isinstance(event, StepFinished):

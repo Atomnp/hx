@@ -28,6 +28,7 @@ class ToolContext:
     permissions: "PermissionPolicy | None" = None
     approve: "Approver | None" = None  # asks the user; None = nobody to ask, so "ask" becomes "deny"
     sandbox: "SandboxConfig | None" = None  # OS sandbox for shell commands; None = off
+    todos: list[dict] = field(default_factory=list)  # the agent's current plan (todo_write)
 
 
 class Tool:

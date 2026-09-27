@@ -95,6 +95,19 @@ def coerce(value, expected: str | None):
     return value
 
 
+# Arguments that carry code or file text. Only these get the escaped-newline repair: in a shell command,
+# a literal \n is often intentional (printf, sed).
+CODE_ARGS = {"content", "old_string", "new_string"}
+
+
+def unescape_code(value: str) -> str | None:
+    """'def f():\\n    return 1' (no real newlines, several literal backslash-n) -> real newlines.
+    A single literal \n is left alone: it's probably inside a string literal like print("a\\nb")."""
+    if "\n" in value or value.count("\\n") < 2:
+        return None
+    return value.replace("\\r\\n", "\n").replace("\\n", "\n").replace("\\t", "\t").replace('\\"', '"')
+
+
 def repair_arguments(args: dict, schema: dict) -> tuple[dict, list[str]]:
     props = schema.get("properties", {})
     required = set(schema.get("required", []))
@@ -112,6 +125,10 @@ def repair_arguments(args: dict, schema: dict) -> tuple[dict, list[str]]:
         if value is None and key not in required:
             del out[key]
             notes.append(f"dropped null optional argument '{key}'")
+            continue
+        if key in CODE_ARGS and isinstance(value, str) and (unescaped := unescape_code(value)) is not None:
+            out[key] = unescaped
+            notes.append(f"'{key}' contained escaped newlines (\\n) instead of real ones; unescaped it")
             continue
         expected = props.get(key, {}).get("type")
         fixed = coerce(value, expected)

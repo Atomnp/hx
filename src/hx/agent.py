@@ -17,6 +17,7 @@ from hx.messages import Message, ToolCall, system, tool_result, user
 from hx.models.base import ModelClient
 from hx.repair import LoopGuard, extract_text_tool_calls
 from hx.session import Session
+from hx.tools.todo import render, unfinished
 from hx.tools import ToolContext, ToolRegistry
 
 DEFAULT_SYSTEM_PROMPT = "You are hx, a helpful coding assistant running in the user's terminal. Be concise."
@@ -68,6 +69,7 @@ class Agent:
         if system_prompt and messages and messages[0].role == "system":
             messages[0] = system(system_prompt)
         self.messages, self.turns, self.session = messages, turns, session
+        self.ctx.todos = last_todos(messages)
         self.rewrote_history()
         return sum(1 for m in messages if m.role == "user")
 
@@ -79,6 +81,7 @@ class Agent:
             self.session.turn(*turn)
         self.add(user(text))
         guard = LoopGuard()
+        reminded = False
 
         self.context.set_tools(self.tools.schemas())
         for step in range(1, self.max_steps + 1):
@@ -100,6 +103,17 @@ class Agent:
             on_event(StepFinished(step, response.usage, self.context.fraction_used(self.messages)))
 
             if not message.tool_calls:
+                open_items = unfinished(self.ctx.todos)
+                if open_items and not reminded:
+                    # The model wants to stop with plan items still open. Remind it once; a second stop is final.
+                    reminded = True
+                    on_event(Notice(f"{len(open_items)} todo item(s) still open; reminding the model"))
+                    self.add(user(
+                        "<system-reminder>Your todo list still has unfinished items:\n"
+                        f"{render(open_items)}\nContinue working on them, or update the list (mark items completed, "
+                        "or remove ones that no longer apply) and explain why.</system-reminder>"
+                    ))
+                    continue
                 on_event(TurnFinished(message.content, step, "done"))
                 return message.content
 
@@ -181,3 +195,12 @@ class Agent:
         self.rewrote_history()
         self.ctx.read_files.clear()  # file contents changed under the model: it must re-read before editing
         return f"Undid the last turn.\n{summary or '(no file changes)'}"
+
+
+def last_todos(messages: list[Message]) -> list[dict]:
+    """The plan as of the last todo_write call, so a resumed session keeps its todo list."""
+    for m in reversed(messages):
+        for c in reversed(m.tool_calls):
+            if c.name == "todo_write" and isinstance(c.arguments.get("todos"), list):
+                return c.arguments["todos"]
+    return []

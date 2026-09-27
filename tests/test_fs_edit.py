@@ -97,3 +97,19 @@ def test_edit_input_errors(env):
     run("read_file", path="a.py")
     assert "identical" in run("edit_file", path="a.py", old_string="a", new_string="a").content
     assert "write_file" in run("edit_file", path="missing.py", old_string="a", new_string="b").content
+
+
+def test_edit_reports_syntax_errors_immediately(env):
+    root, run = env
+    (root / "a.py").write_text("def f():\n    return 1\n")
+    run("read_file", path="a.py")
+    r = run("edit_file", path="a.py", old_string="    return 1", new_string="    return (1")
+    assert "syntax error" in r.content and "line 2" in r.content
+    r = run("edit_file", path="a.py", old_string="    return (1", new_string="    return 1")
+    assert "syntax error" not in r.content
+
+
+def test_write_reports_bad_json(env):
+    root, run = env
+    assert "syntax error" in run("write_file", path="c.json", content='{"a": 1,}').content
+    assert "syntax error" not in run("write_file", path="d.json", content='{"a": 1}').content

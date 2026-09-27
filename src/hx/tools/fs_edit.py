@@ -4,12 +4,35 @@ Both refuse to change a file the model hasn't read, or one that changed on disk 
 """
 
 import difflib
+import json
 from pathlib import Path
 
 from hx.tools.base import Tool, ToolContext, ToolResult
 from hx.tools.fs_read import resolve
 
 MAX_DIFF_LINES = 60
+
+
+def diagnostics(path: Path, text: str) -> str:
+    """Cheap syntax check right after a write, so a broken edit is reported in the same tool result
+    instead of being discovered (much) later by a failing test run."""
+    problem = None
+    if path.suffix == ".py":
+        try:
+            compile(text, str(path), "exec")
+        except SyntaxError as e:
+            problem = f"line {e.lineno}: {e.msg}"
+    elif path.suffix == ".json":
+        try:
+            json.loads(text)
+        except json.JSONDecodeError as e:
+            problem = f"line {e.lineno}: {e.msg}"
+    if problem is None:
+        return ""
+    lines = text.splitlines()
+    n = int(problem.split(":")[0].split()[1]) if problem.startswith("line ") else 0
+    context = "\n".join(f"{i + 1:6}\t{lines[i]}" for i in range(max(0, n - 3), min(len(lines), n + 2))) if n else ""
+    return f"\n\n⚠ The file now has a syntax error ({problem}). Fix it before doing anything else:\n{context}"
 
 
 def mark_read(ctx: ToolContext, path: Path) -> None:
@@ -63,12 +86,12 @@ class WriteFile(Tool):
             before = path.read_text(errors="replace")
             path.write_text(content)
             mark_read(ctx, path)
-            return ToolResult(f"Overwrote {path} ({len(content.splitlines())} lines).\n{diff(before, content, path)}")
+            return ToolResult(f"Overwrote {path} ({len(content.splitlines())} lines).\n{diff(before, content, path)}{diagnostics(path, content)}")
 
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content)
         mark_read(ctx, path)  # we know its exact content, so later edits are allowed
-        return ToolResult(f"Created {path} ({len(content.splitlines())} lines).")
+        return ToolResult(f"Created {path} ({len(content.splitlines())} lines).{diagnostics(path, content)}")
 
 
 def normalize(text: str) -> str:
@@ -148,6 +171,7 @@ class EditFile(Tool):
             mark_read(ctx, path)
             return ToolResult(
                 f"Edited {path}: 1 replacement (matched after ignoring trailing whitespace).\n{diff(text, after, path)}"
+                f"{diagnostics(path, after)}"
             )
 
         if count > 1 and not args.get("replace_all"):
@@ -165,7 +189,7 @@ class EditFile(Tool):
         after = text.replace(old, new) if args.get("replace_all") else text.replace(old, new, 1)
         path.write_text(after)
         mark_read(ctx, path)
-        return ToolResult(f"Edited {path}: {count} replacement(s).\n{diff(text, after, path)}")
+        return ToolResult(f"Edited {path}: {count} replacement(s).\n{diff(text, after, path)}{diagnostics(path, after)}")
 
     @staticmethod
     def not_found_message(path: Path, text: str, old: str) -> str:

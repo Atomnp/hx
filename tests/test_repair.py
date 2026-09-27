@@ -109,3 +109,22 @@ def test_agent_rejects_placeholder_and_warns_on_loops():
     agent.run("go")
     assert "placeholders" in model.requests[1][-1].content
     assert "3 times" in model.requests[4][-1].content
+
+
+def test_escaped_newlines_in_code_args_are_fixed():
+    schema = {"type": "object", "properties": {"content": {"type": "string"}, "command": {"type": "string"}}}
+    args, notes = repair_arguments({"content": 'def f():\\n    """Doc."""\\n    return 1'}, schema)
+    assert args["content"] == 'def f():\n    """Doc."""\n    return 1' and "escaped newlines" in notes[0]
+
+
+def test_legit_backslash_n_is_left_alone():
+    schema = {"type": "object", "properties": {"content": {"type": "string"}, "command": {"type": "string"}}}
+    one = 'print("a\\nb")'  # a single \n inside a string literal
+    real = 'x = 1\nprint("a\\nb\\nc")'  # has real newlines already
+    cmd = "printf 'a\\nb\\nc'"  # shell commands are never touched
+    args, notes = repair_arguments({"content": one}, schema)
+    assert args["content"] == one and notes == []
+    args, _ = repair_arguments({"content": real}, schema)
+    assert args["content"] == real
+    args, _ = repair_arguments({"command": cmd}, schema)
+    assert args["command"] == cmd
