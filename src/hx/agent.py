@@ -1,7 +1,8 @@
 """The agent loop: call the model, run the tools it asks for, feed the results back, repeat."""
 
 from hx.checkpoints import CheckpointError, Checkpoints
-from hx.context import ContextManager
+from hx.compaction import compact
+from hx.context import CHARS_PER_TOKEN, ContextManager
 from hx.events import (
     EventHandler,
     Notice,
@@ -39,7 +40,8 @@ class Agent:
         self.checkpoints = checkpoints
         self.context = context or ContextManager()
         # One entry per turn: (snapshot taken before the turn, conversation length before the turn).
-        self.turns: list[tuple[str | None, int]] = []
+        # The length becomes None after compaction: those messages no longer exist individually.
+        self.turns: list[tuple[str | None, int | None]] = []
 
     def run(self, text: str, on_event: EventHandler = ignore) -> str:
         """Handle one user request, calling the model (and tools) as many times as needed."""
@@ -49,8 +51,7 @@ class Agent:
 
         self.context.set_tools(self.tools.schemas())
         for step in range(1, self.max_steps + 1):
-            for note in self.context.clear_old_results(self.messages):
-                on_event(Notice(note))
+            self.fit_context(on_event)
             response = self.model.chat(
                 self.messages,
                 tools=self.tools.schemas() or None,
@@ -88,6 +89,38 @@ class Agent:
         result = self.tools.execute(call, self.ctx)
         return result.content, result.is_error
 
+    # ---------------------------------------------------------------- context management
+
+    def fit_context(self, on_event: EventHandler) -> None:
+        """Escalation ladder, cheapest first, so the prompt never silently overflows the window."""
+        cm = self.context
+        notes = cm.clear_old_results(self.messages)  # 1. stub old tool results (free)
+        if cm.fraction_used(self.messages) >= cm.compact_at:
+            report = self.compact()  # 2. summarize older messages (one model call)
+            if report:
+                notes.append(report)
+        if cm.fraction_used(self.messages) >= cm.compact_at:
+            notes += cm.clear_old_results(self.messages, keep_recent=1, force=True)  # 3. keep only the newest result
+        if cm.fraction_used(self.messages) >= 1.0:
+            notes += cm.shrink_last_result(self.messages)  # 4. cut the newest result itself
+        if cm.fraction_used(self.messages) >= 1.0:
+            notes.append("WARNING: the conversation still exceeds the context window; early messages may be lost")
+        for note in notes:
+            on_event(Notice(note))
+
+    # ---------------------------------------------------------------- compaction
+
+    def compact(self) -> str:
+        """Summarize older messages to free up context. Returns a one-line report."""
+        before = self.context.estimate(self.messages)
+        budget_chars = int(self.context.budget * 0.6 * CHARS_PER_TOKEN)  # what the summarizer may read
+        self.messages, summary = compact(self.model, self.messages, self.context.keep_recent, budget_chars)
+        if not summary:
+            return ""
+        # Earlier turns can no longer be rewound message by message; undo will still restore their files.
+        self.turns = [(sha, None) for sha, _ in self.turns]
+        return f"compacted the conversation: ~{before} → ~{self.context.estimate(self.messages)} tokens"
+
     # ---------------------------------------------------------------- checkpoints
 
     def take_snapshot(self, label: str, on_event: EventHandler) -> str | None:
@@ -108,6 +141,10 @@ class Agent:
         summary = ""
         if sha and self.checkpoints:
             summary = self.checkpoints.restore(sha)
-        del self.messages[length:]
+        if length is not None:
+            del self.messages[length:]
+        else:  # compacted away: we can't cut the conversation, so tell the model instead
+            self.messages.append(user("[The user ran /undo: the file changes from the last turn were reverted.]"))
+            self.messages.append(Message("assistant", "Noted: the last turn's file changes were reverted."))
         self.ctx.read_files.clear()  # file contents changed under the model: it must re-read before editing
         return f"Undid the last turn.\n{summary or '(no file changes)'}"

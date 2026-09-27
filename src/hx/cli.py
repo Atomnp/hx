@@ -64,7 +64,7 @@ def repl(agent: Agent) -> None:
     mode = agent.ctx.permissions.mode if agent.ctx.permissions else "none"
     sandbox = "on" if agent.ctx.sandbox and agent.ctx.sandbox.enabled else "off"
     print(f"hx {__version__} · {agent.model.name} · permissions: {mode} · sandbox: {sandbox}")
-    print("commands: /undo  /checkpoints  /exit")
+    print("commands: /undo  /checkpoints  /compact  /exit")
     while True:
         try:
             text = input("\n› ").strip()
@@ -80,6 +80,9 @@ def repl(agent: Agent) -> None:
                 print(agent.undo())
             except CheckpointError as e:
                 print(f"[undo failed] {e}", file=sys.stderr)
+            continue
+        if text == "/compact":
+            print(agent.compact() or "Nothing to compact yet.")
             continue
         if text == "/checkpoints":
             if not agent.checkpoints:
