@@ -1,6 +1,7 @@
 """Command-line entry point: an interactive REPL around the agent."""
 
 import argparse
+import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -12,6 +13,7 @@ from hx.commands import Commands, Prompt
 from hx.context import ContextManager
 from hx.config import Settings
 from hx.hooks import load_hooks
+from hx.tracing import TRACE_DIR, Stats, Tracer, fanout
 from hx.ui import make_ui
 from hx.models import ModelError, make_client
 from hx.permissions import MODES, Approval, Decision, load_policy
@@ -97,6 +99,8 @@ class ReplState:
     agent: Agent
     cwd: Path
     exit: bool = False
+    tracer: Tracer | None = None
+    stats: Stats | None = None
 
 
 def repl(agent: Agent) -> None:
@@ -104,9 +108,14 @@ def repl(agent: Agent) -> None:
     sandbox = "on" if agent.ctx.sandbox and agent.ctx.sandbox.enabled else "off"
     print(f"hx {__version__} · {agent.model.name} · permissions: {mode} · sandbox: {sandbox}")
     print("/help for commands · # <fact> to remember something")
-    state = ReplState(agent, agent.ctx.cwd)
+    session_id = agent.session.id if agent.session else "no-session"
+    tracer = Tracer(agent.model.name.split(":", 1)[-1], agent.model.name.split(":", 1)[0],
+                    path=TRACE_DIR / f"{session_id}.jsonl", otlp_endpoint=os.environ.get("HX_OTLP_ENDPOINT"))
+    stats = Stats()
+    state = ReplState(agent, agent.ctx.cwd, tracer=tracer, stats=stats)
     commands = Commands(state)
     ui = make_ui()
+    handler = fanout(ui, tracer, stats)
     enable_history()
     while not state.exit:
         try:
@@ -128,7 +137,7 @@ def repl(agent: Agent) -> None:
                 continue
             text = out.text  # a custom command expanded into a prompt for the agent
         try:
-            agent.run(text, on_event=ui)
+            agent.run(text, on_event=handler)
         except ModelError as e:
             print(f"\n[model error] {e}", file=sys.stderr)
         finally:

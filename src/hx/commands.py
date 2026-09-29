@@ -53,6 +53,8 @@ class Commands:
             Command("todos", "show the agent's todo list", lambda s, a: render(s.agent.ctx.todos)),
             Command("mode", "show or change the permission mode: /mode auto-edit", self.mode),
             Command("memory", "show memory files; '# fact' adds to project memory", self.memory),
+            Command("stats", "tokens, model time and tool usage for this session", self.stats),
+            Command("trace", "the last turn as a span tree with timings", self.trace),
             Command("exit", "quit", self.quit),
         ]}
         self.custom = load_custom(state.cwd)
@@ -105,6 +107,12 @@ class Commands:
         for scope, path in memory_paths(s.cwd).items():
             out.append(f"{scope}: {path}\n{path.read_text().strip() if path.is_file() else '  (empty)'}")
         return "\n\n".join(out)
+
+    def stats(self, s, a):
+        return s.stats.report() if getattr(s, "stats", None) else "Stats are off."
+
+    def trace(self, s, a):
+        return s.tracer.tree() if getattr(s, "tracer", None) else "Tracing is off."
 
     def quit(self, s, a):
         s.exit = True

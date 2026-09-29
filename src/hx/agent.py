@@ -6,6 +6,7 @@ from hx.context import CHARS_PER_TOKEN, ContextManager
 from hx.events import (
     EventHandler,
     ModelCallStarted,
+    TurnStarted,
     Notice,
     StepFinished,
     TextDelta,
@@ -102,6 +103,7 @@ class Agent:
         self.add(Message("assistant", "Stopped."))
 
     def _run(self, text: str, on_event: EventHandler) -> str:
+        on_event(TurnStarted(text))
         self.ctx.on_event = on_event
         hooks = self.ctx.hooks if self.lifecycle_hooks else None
         if hooks:
