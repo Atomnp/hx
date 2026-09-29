@@ -2,11 +2,13 @@
 
 import argparse
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 from hx import __version__
 from hx.agent import Agent, make_child_agent
 from hx.checkpoints import CheckpointError, checkpoints_for
+from hx.commands import Commands, Prompt
 from hx.context import ContextManager
 from hx.config import Settings
 from hx.hooks import load_hooks
@@ -92,12 +94,21 @@ def print_event(event: Event) -> None:
               file=sys.stderr, flush=True)
 
 
+@dataclass
+class ReplState:
+    agent: Agent
+    cwd: Path
+    exit: bool = False
+
+
 def repl(agent: Agent) -> None:
     mode = agent.ctx.permissions.mode if agent.ctx.permissions else "none"
     sandbox = "on" if agent.ctx.sandbox and agent.ctx.sandbox.enabled else "off"
     print(f"hx {__version__} · {agent.model.name} · permissions: {mode} · sandbox: {sandbox}")
-    print("commands: /undo  /checkpoints  /compact  /exit")
-    while True:
+    print("/help for commands · # <fact> to remember something")
+    state = ReplState(agent, agent.ctx.cwd)
+    commands = Commands(state)
+    while not state.exit:
         try:
             text = input("\n› ").strip()
         except (EOFError, KeyboardInterrupt):
@@ -105,23 +116,17 @@ def repl(agent: Agent) -> None:
             return
         if not text:
             continue
-        if text in ("/exit", "/quit"):
-            return
-        if text == "/undo":
+        if text.startswith(("/", "#")):
             try:
-                print(agent.undo())
+                out = commands.handle(text)
             except CheckpointError as e:
-                print(f"[undo failed] {e}", file=sys.stderr)
-            continue
-        if text == "/compact":
-            print(agent.compact() or "Nothing to compact yet.")
-            continue
-        if text == "/checkpoints":
-            if not agent.checkpoints:
-                print("Checkpoints are off.")
-            for c in agent.checkpoints.list() if agent.checkpoints else []:
-                print(f"  {c.sha[:8]}  {c.age:>16}  {c.label}")
-            continue
+                print(f"[failed] {e}", file=sys.stderr)
+                continue
+            if not isinstance(out, Prompt):
+                if out:
+                    print(out)
+                continue
+            text = out.text  # a custom command expanded into a prompt for the agent
         try:
             agent.run(text, on_event=print_event)
         except ModelError as e:

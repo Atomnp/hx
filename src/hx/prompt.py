@@ -8,6 +8,7 @@ import subprocess
 from datetime import date
 from pathlib import Path
 
+from hx.memory import prompt_section as memory_section
 from hx.skills import Skill, prompt_section
 from hx.tools.base import ToolContext
 
@@ -116,4 +117,6 @@ def build_system_prompt(ctx: ToolContext, skills: list[Skill] | None = None) -> 
         sections.append(skills_text)
     if instructions := project_instructions(ctx.cwd):
         sections.append(instructions)
+    if memory := memory_section(ctx.cwd):
+        sections.append(memory)
     return "\n\n".join(sections)
