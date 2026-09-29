@@ -177,13 +177,13 @@ class Rule:
 
     @classmethod
     def parse(cls, text: str) -> "Rule":
-        m = re.fullmatch(r"\s*([\w\-]+)\s*(?:\((.*)\))?\s*", text)
+        m = re.fullmatch(r"\s*([\w\-*]+)\s*(?:\((.*)\))?\s*", text)
         if not m:
             raise ValueError(f"bad permission rule: {text!r} (expected tool or tool(pattern))")
         return cls(m.group(1), m.group(2), text.strip())
 
     def matches(self, tool_name: str, subject: str | None) -> bool:
-        if self.tool != tool_name:
+        if not fnmatch.fnmatchcase(tool_name, self.tool):  # tool names may be globs: "mcp__github__*"
             return False
         if self.pattern is None:
             return True

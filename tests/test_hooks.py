@@ -83,14 +83,15 @@ def test_stop_hook_keeps_agent_working_but_is_capped(tmp_path):
 
 
 def test_project_hooks_need_trust(tmp_path, monkeypatch):
-    monkeypatch.setattr(hooks_mod, "TRUST_FILE", tmp_path / "trusted.json")
+    import hx.trust
+    monkeypatch.setattr(hx.trust, "TRUST_FILE", tmp_path / "trusted.json")
     monkeypatch.setattr(hooks_mod.Path, "home", lambda: tmp_path / "home")
     (tmp_path / ".hx").mkdir()
     (tmp_path / ".hx" / "settings.json").write_text(json.dumps({"hooks": {"Stop": [{"command": "true"}]}}))
 
-    hooks, notes = load_hooks(tmp_path, confirm=lambda hs: False)
+    hooks, notes = load_hooks(tmp_path, confirm=lambda kind, cfg: False)
     assert not hooks and "untrusted" in notes[0]
-    hooks, _ = load_hooks(tmp_path, confirm=lambda hs: True)
+    hooks, _ = load_hooks(tmp_path, confirm=lambda kind, cfg: True)
     assert hooks
     hooks, _ = load_hooks(tmp_path, confirm=None)  # remembered
     assert hooks

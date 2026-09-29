@@ -6,7 +6,6 @@ Exit 0 = ok, exit 2 = block / send feedback, anything else = hook error.
     {"hooks": {"PostToolUse": [{"matcher": "edit_file|write_file", "command": "ruff format --quiet $HX_FILE"}]}}
 """
 
-import hashlib
 import json
 import os
 import re
@@ -14,8 +13,9 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from hx import trust
+
 EVENTS = ("SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop")
-TRUST_FILE = Path.home() / ".hx" / "trusted_hooks.json"
 
 
 @dataclass
@@ -88,7 +88,7 @@ def parse(config: dict) -> list[Hook]:
 
 def load_hooks(cwd: Path, confirm=None) -> tuple[Hooks, list[str]]:
     """User hooks are always trusted (you wrote them). Project hooks come with the repo, perhaps from someone else,
-    so they run only after you confirm them once; the confirmation is tied to their exact content."""
+    so they run only after you confirm them once; the confirmation is tied to their exact content (hx.trust)."""
     hooks: list[Hook] = []
     notes: list[str] = []
     user_settings = Path.home() / ".hx" / "settings.json"
@@ -99,25 +99,9 @@ def load_hooks(cwd: Path, confirm=None) -> tuple[Hooks, list[str]]:
     if project_settings.is_file():
         config = json.loads(project_settings.read_text()).get("hooks", {})
         if config:
-            project_hooks = parse(config)
-            if is_trusted(cwd, config) or (confirm and confirm(project_hooks)):
-                trust(cwd, config)
+            project_hooks = parse(config)  # validate before asking
+            if trust.gate(cwd, "hooks", config, confirm):
                 hooks += project_hooks
             else:
                 notes.append(f"ignored {len(project_hooks)} untrusted project hook(s) from {project_settings}")
     return Hooks(hooks, cwd), notes
-
-
-def fingerprint(cwd: Path, config: dict) -> str:
-    return hashlib.sha256((str(cwd.resolve()) + json.dumps(config, sort_keys=True)).encode()).hexdigest()
-
-
-def is_trusted(cwd: Path, config: dict) -> bool:
-    return TRUST_FILE.is_file() and fingerprint(cwd, config) in json.loads(TRUST_FILE.read_text())
-
-
-def trust(cwd: Path, config: dict) -> None:
-    trusted = json.loads(TRUST_FILE.read_text()) if TRUST_FILE.is_file() else []
-    if (fp := fingerprint(cwd, config)) not in trusted:
-        TRUST_FILE.parent.mkdir(parents=True, exist_ok=True)
-        TRUST_FILE.write_text(json.dumps(trusted + [fp]))
