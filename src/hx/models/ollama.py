@@ -9,7 +9,7 @@ from typing import Any
 
 from hx.config import Settings
 from hx.messages import Message, ToolCall
-from hx.models.base import ModelError, ModelResponse, TextCallback, Usage
+from hx.models.base import ModelError, ModelResponse, TextCallback, Usage, http_error
 
 
 def to_wire(m: Message) -> dict[str, Any]:
@@ -87,10 +87,12 @@ class OllamaClient:
                     if chunk.get("done"):
                         final = chunk
         except urllib.error.HTTPError as e:
-            detail = e.read().decode(errors="replace")
-            raise ModelError(f"Ollama HTTP {e.code}: {detail}") from e
+            raise http_error(e.code, "Ollama: " + e.read().decode(errors="replace"), e.headers.get("Retry-After")) from e
         except urllib.error.URLError as e:
-            raise ModelError(f"Can't reach Ollama at {s.host} ({e.reason}). Is it running? Try: ollama serve") from e
+            raise ModelError(f"Can't reach Ollama at {s.host} ({e.reason}). Is it running? Try: ollama serve",
+                             retryable=True) from e
+        except (TimeoutError, ConnectionError) as e:
+            raise ModelError(f"Ollama connection failed: {e}", retryable=True) from e
 
         return ModelResponse(
             message=Message("assistant", "".join(content), tool_calls=calls, thinking="".join(thinking)),

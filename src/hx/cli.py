@@ -13,8 +13,7 @@ from hx.context import ContextManager
 from hx.config import Settings
 from hx.hooks import load_hooks
 from hx.ui import make_ui
-from hx.models import ModelError
-from hx.models.ollama import OllamaClient
+from hx.models import ModelError, make_client
 from hx.permissions import MODES, Approval, Decision, load_policy
 from hx.prompt import build_system_prompt
 from hx.session import Session, find_session, list_sessions
@@ -29,7 +28,10 @@ from hx.tools.builtin import default_tools
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="hx", description="A coding-agent harness.")
     parser.add_argument("--version", action="version", version=f"hx {__version__}")
-    parser.add_argument("--model", help="Ollama model name (default: $HX_MODEL or qwen3:14b)")
+    parser.add_argument("--model", help="model name (default: $HX_MODEL or qwen3:14b)")
+    parser.add_argument("--provider", choices=["ollama", "openai"],
+                        help="ollama (native API) or openai (any OpenAI-compatible server; see --base-url)")
+    parser.add_argument("--base-url", help="OpenAI-compatible endpoint, e.g. http://localhost:11434/v1")
     parser.add_argument("--mode", choices=MODES, help="permission mode (default: from .hx/settings.json, else ask)")
     parser.add_argument("--no-sandbox", action="store_true", help="run shell commands without the OS sandbox")
     parser.add_argument("--no-checkpoints", action="store_true", help="don't snapshot the workspace before each turn")
@@ -143,6 +145,10 @@ def main(argv: list[str] | None = None) -> int:
     settings = Settings.from_env()
     if args.model:
         settings.model = args.model
+    if args.provider:
+        settings.provider = args.provider
+    if args.base_url:
+        settings.base_url = args.base_url
     ctx = ToolContext()
     ctx.permissions = load_policy(ctx.cwd, args.mode)
     ctx.approve = ask_user
@@ -158,7 +164,7 @@ def main(argv: list[str] | None = None) -> int:
         start = ctx.hooks.run("SessionStart", {})
         if start.output:
             system_prompt += f"\n\n# Context from SessionStart hooks\n{start.output}"
-    model = OllamaClient(settings)
+    model = make_client(settings, on_retry=lambda msg: print(f"  [hx] {msg}", file=sys.stderr))
     tools = default_tools()
     if skills:
         tools.register(SkillTool(skills))
