@@ -12,7 +12,7 @@ from hx.commands import Commands, Prompt
 from hx.context import ContextManager
 from hx.config import Settings
 from hx.hooks import load_hooks
-from hx.events import Event, Notice, StepFinished, TextDelta, ToolFinished, ToolStarted, TurnFinished
+from hx.ui import make_ui
 from hx.models import ModelError
 from hx.models.ollama import OllamaClient
 from hx.permissions import MODES, Approval, Decision, load_policy
@@ -73,25 +73,21 @@ def ask_user(tool: Tool, args: dict, decision: Decision, rule: str) -> Approval:
     return Approval(False, feedback=feedback)
 
 
-def print_event(event: Event) -> None:
-    if isinstance(event, TextDelta):
-        print(event.text, end="", flush=True)
-    elif isinstance(event, ToolStarted):
-        print(f"\n  → {event.call.name}({event.call.arguments})", flush=True)
-    elif isinstance(event, ToolFinished):
-        mark = "✗" if event.is_error else "✓"
-        print(f"  {mark} {event.result[:200]}", flush=True)
-        warnings = [line for line in event.result[200:].splitlines() if line.startswith("⚠")]
-        for line in warnings:  # don't let a preview cut hide a warning the model received
-            print(f"  {line}", flush=True)
-    elif isinstance(event, TurnFinished) and event.reason == "max_steps":
-        print(f"\n  [hx] stopped after {event.steps} steps without finishing. Say 'continue' to keep going.", file=sys.stderr)
-    elif isinstance(event, Notice):
-        print(f"  [hx] {event.text}", file=sys.stderr, flush=True)
-    elif isinstance(event, StepFinished):
-        u = event.usage
-        print(f"\n  [{u.prompt_tokens} in / {u.completion_tokens} out, {u.duration_s:.1f}s, context {event.context_used:.0%}]",
-              file=sys.stderr, flush=True)
+def enable_history() -> None:
+    """Arrow-key history across sessions, via the standard library's readline."""
+    try:
+        import atexit
+        import readline
+    except ImportError:
+        return
+    path = Path.home() / ".hx" / "history"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        readline.read_history_file(path)
+    except OSError:
+        pass
+    readline.set_history_length(1000)
+    atexit.register(lambda: readline.write_history_file(path))
 
 
 @dataclass
@@ -108,6 +104,8 @@ def repl(agent: Agent) -> None:
     print("/help for commands · # <fact> to remember something")
     state = ReplState(agent, agent.ctx.cwd)
     commands = Commands(state)
+    ui = make_ui()
+    enable_history()
     while not state.exit:
         try:
             text = input("\n› ").strip()
@@ -128,9 +126,12 @@ def repl(agent: Agent) -> None:
                 continue
             text = out.text  # a custom command expanded into a prompt for the agent
         try:
-            agent.run(text, on_event=print_event)
+            agent.run(text, on_event=ui)
         except ModelError as e:
             print(f"\n[model error] {e}", file=sys.stderr)
+        finally:
+            if hasattr(ui, "cleanup"):
+                ui.cleanup()
 
 
 def main(argv: list[str] | None = None) -> int:

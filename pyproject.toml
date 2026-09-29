@@ -4,7 +4,9 @@ version = "0.1.0"
 description = "A coding-agent harness built step by step, for learning."
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "rich>=15.0.0",
+]
 
 [project.scripts]
 hx = "hx.cli:main"

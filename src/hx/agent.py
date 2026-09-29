@@ -5,6 +5,7 @@ from hx.compaction import compact
 from hx.context import CHARS_PER_TOKEN, ContextManager
 from hx.events import (
     EventHandler,
+    ModelCallStarted,
     Notice,
     StepFinished,
     TextDelta,
@@ -77,7 +78,30 @@ class Agent:
         return sum(1 for m in messages if m.role == "user")
 
     def run(self, text: str, on_event: EventHandler = ignore) -> str:
-        """Handle one user request, calling the model (and tools) as many times as needed."""
+        """Handle one user request. Ctrl-C (KeyboardInterrupt) ends the turn cleanly instead of crashing hx."""
+        try:
+            return self._run(text, on_event)
+        except KeyboardInterrupt:
+            self.repair_after_interrupt()
+            on_event(TurnFinished("", 0, "interrupted"))
+            return ""
+
+    def repair_after_interrupt(self) -> None:
+        """Leave the conversation valid after Ctrl-C: every tool call needs a result, and the model should know
+        the user stopped it (otherwise it may resume the abandoned plan on the next turn)."""
+        answered = {m.tool_call_id for m in self.messages if m.role == "tool"}
+        for m in reversed(self.messages):
+            if m.role == "assistant" and m.tool_calls:
+                for c in m.tool_calls:
+                    if c.id not in answered:
+                        self.add(tool_result(c, "Interrupted by the user before this finished."))
+                break
+            if m.role == "user":
+                break
+        self.add(user("[The user interrupted this turn. Stop and wait for their next instruction.]"))
+        self.add(Message("assistant", "Stopped."))
+
+    def _run(self, text: str, on_event: EventHandler) -> str:
         self.ctx.on_event = on_event
         hooks = self.ctx.hooks if self.lifecycle_hooks else None
         if hooks:
@@ -101,6 +125,7 @@ class Agent:
         self.context.set_tools(self.tools.schemas())
         for step in range(1, self.max_steps + 1):
             self.fit_context(on_event)
+            on_event(ModelCallStarted(step))
             response = self.model.chat(
                 self.messages,
                 tools=self.tools.schemas() or None,

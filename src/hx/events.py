@@ -8,6 +8,13 @@ from hx.models.base import Usage
 
 
 @dataclass
+class ModelCallStarted:
+    """A model call is about to begin (UIs show a spinner until text or a tool call arrives)."""
+
+    step: int
+
+
+@dataclass
 class TextDelta:
     """A piece of streamed assistant text."""
 
@@ -48,10 +55,10 @@ class TurnFinished:
 
     text: str
     steps: int
-    reason: str  # "done" | "max_steps"
+    reason: str  # "done" | "max_steps" | "interrupted"
 
 
-Event = Union[TextDelta, ToolStarted, ToolFinished, StepFinished, Notice, TurnFinished]
+Event = Union[ModelCallStarted, TextDelta, ToolStarted, ToolFinished, StepFinished, Notice, TurnFinished]
 EventHandler = Callable[[Event], None]
 
 

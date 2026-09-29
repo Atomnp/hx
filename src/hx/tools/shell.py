@@ -40,10 +40,22 @@ def run_native(binary: str, command: str, cwd: str, timeout: int, sandbox_args: 
         *(sandbox_args or []),
         "--", "/bin/bash", "-c", command,
     ]
-    proc = subprocess.run(argv, capture_output=True, text=True, errors="replace", env={**os.environ, **QUIET_ENV}, timeout=timeout + 15)
+    proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, errors="replace",
+                            env={**os.environ, **QUIET_ENV})
+    try:
+        out, err = proc.communicate(timeout=timeout + 15)
+    except KeyboardInterrupt:
+        # Ctrl-C reached hx-exec too (same terminal process group). It forwards the signal to the command's group,
+        # waits up to 2s, then SIGKILLs it. Give it time to do that cleanup; killing hx-exec now would orphan
+        # the command and everything it started.
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+        raise
     if proc.returncode != 0:
-        raise RuntimeError(f"hx-exec failed: {proc.stderr.strip()}")
-    return json.loads(proc.stdout)
+        raise RuntimeError(f"hx-exec failed: {err.strip()}")
+    return json.loads(out)
 
 
 def run_python(command: str, cwd: str, timeout: int) -> dict:
