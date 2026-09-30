@@ -40,6 +40,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--resume", nargs="?", const="latest", metavar="ID",
                         help="continue a saved session (the latest one, or the given id / id prefix)")
     parser.add_argument("--sessions", action="store_true", help="list saved sessions for this workspace and exit")
+    parser.add_argument("-p", "--print", metavar="PROMPT",
+                        help="headless: run one request and exit ('-' reads the prompt from stdin)")
+    parser.add_argument("--output-format", choices=["text", "json", "stream-json"], default="text",
+                        help="headless output: final text, one JSON summary, or one JSON event per line")
+    parser.add_argument("--allow", action="append", metavar="RULE",
+                        help='add an allow rule for this run, e.g. --allow "bash(npm test*)" (repeatable)')
     return parser
 
 
@@ -145,12 +151,13 @@ def repl(agent: Agent) -> None:
                 ui.cleanup()
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
-    if args.sessions:
-        for info in list_sessions(Path.cwd()):
-            print(f"  {info.id}  {info.created}  {info.messages:3} msgs  {info.title}")
-        return 0
+class SessionNotFound(Exception):
+    pass
+
+
+def build_agent(args, interactive: bool = True):
+    """Assemble all the parts into one Agent. Shared by the REPL and headless mode.
+    Returns (agent, cleanup)."""
     settings = Settings.from_env()
     if args.model:
         settings.model = args.model
@@ -160,9 +167,11 @@ def main(argv: list[str] | None = None) -> int:
         settings.base_url = args.base_url
     ctx = ToolContext()
     ctx.permissions = load_policy(ctx.cwd, args.mode)
-    ctx.approve = ask_user
+    ctx.approve = ask_user if interactive else None  # headless: nobody to ask, so ask means deny
+    for rule in args.allow or []:
+        ctx.permissions.add_allow(rule)
     ctx.sandbox = load_sandbox(ctx.cwd, enabled=False if args.no_sandbox else None)
-    ctx.hooks, hook_notes = load_hooks(ctx.cwd, confirm=confirm_project_config)
+    ctx.hooks, hook_notes = load_hooks(ctx.cwd, confirm=confirm_project_config if interactive else None)
     for note in hook_notes:
         print(f"[hx] {note}", file=sys.stderr)
     checkpoints = None if args.no_checkpoints else checkpoints_for(ctx.cwd)
@@ -177,7 +186,7 @@ def main(argv: list[str] | None = None) -> int:
     tools = default_tools()
     if skills:
         tools.register(SkillTool(skills))
-    servers, mcp_notes = load_servers(ctx.cwd, confirm=confirm_project_config)
+    servers, mcp_notes = load_servers(ctx.cwd, confirm=confirm_project_config if interactive else None)
     mcp_clients, mcp_tools, more_notes = connect_all(ctx.cwd, servers)
     for t in mcp_tools:
         tools.register(t)
@@ -195,20 +204,43 @@ def main(argv: list[str] | None = None) -> int:
     if args.resume:
         saved = find_session(ctx.cwd, None if args.resume == "latest" else args.resume)
         if saved is None:
-            print(f"No saved session matches {args.resume!r} here. Try: hx --sessions", file=sys.stderr)
-            return 1
+            raise SessionNotFound(f"No saved session matches {args.resume!r} here. Try: hx --sessions")
         turns = agent.resume(saved, system_prompt)
-        print(f"Resumed session {saved.id} ({turns} earlier request(s)).")
-        last_user = next((m.content for m in reversed(agent.messages) if m.role == "user"), "")
-        last_reply = next((m.content for m in reversed(agent.messages) if m.role == "assistant" and m.content), "")
-        if last_user:
-            print(f"  last request: {last_user[:120]}\n  last reply:   {last_reply[:120]}")
+        if interactive:
+            print(f"Resumed session {saved.id} ({turns} earlier request(s)).")
+            last_user = next((m.content for m in reversed(agent.messages) if m.role == "user"), "")
+            last_reply = next((m.content for m in reversed(agent.messages) if m.role == "assistant" and m.content), "")
+            if last_user:
+                print(f"  last request: {last_user[:120]}\n  last reply:   {last_reply[:120]}")
     else:
         agent.session = Session.create(ctx.cwd, settings.model)
         agent.session.message(agent.messages[0])
-    try:
-        repl(agent)
-    finally:
+
+    def cleanup():
         for client in mcp_clients:
             client.close()
+
+    return agent, cleanup
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    if args.sessions:
+        for info in list_sessions(Path.cwd()):
+            print(f"  {info.id}  {info.created}  {info.messages:3} msgs  {info.title}")
+        return 0
+    try:
+        agent, cleanup = build_agent(args, interactive=not args.print)
+    except SessionNotFound as e:
+        print(e, file=sys.stderr)
+        return 1
+    try:
+        if args.print:
+            from hx.headless import run_headless
+
+            prompt = sys.stdin.read() if args.print == "-" else args.print
+            return run_headless(agent, prompt, args.output_format)
+        repl(agent)
+    finally:
+        cleanup()
     return 0
