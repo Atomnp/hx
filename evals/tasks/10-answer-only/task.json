@@ -1,0 +1,13 @@
+{
+  "prompt": "Which port does server.py listen on? Answer with just the number. Don't change any files.",
+  "check": "true",
+  "tags": [
+    "qa",
+    "read-only"
+  ],
+  "protect": [
+    "server.py",
+    "README.md"
+  ],
+  "answer_contains": "8443"
+}

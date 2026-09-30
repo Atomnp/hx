@@ -1,0 +1,11 @@
+{
+  "prompt": "Add a function multiply(a, b) to mathx.py.",
+  "check": "python3 check.py",
+  "tags": [
+    "instructions"
+  ],
+  "protect": [
+    "check.py",
+    "AGENTS.md"
+  ]
+}

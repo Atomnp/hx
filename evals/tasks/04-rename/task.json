@@ -1,0 +1,11 @@
+{
+  "prompt": "Rename the function get_usr to get_user everywhere in this project. Keep the tests passing.",
+  "check": "! grep -rn 'get_usr\\b' --include=*.py . && python3 -m pytest -q -p no:cacheprovider",
+  "tags": [
+    "refactor",
+    "multi-file"
+  ],
+  "protect": [
+    "test_service.py"
+  ]
+}

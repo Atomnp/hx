@@ -1,0 +1,11 @@
+{
+  "prompt": "The total in test_invoice.py is wrong. Find and fix the cause.",
+  "check": "python3 -m pytest -q -p no:cacheprovider",
+  "tags": [
+    "bugfix",
+    "multi-file"
+  ],
+  "protect": [
+    "test_invoice.py"
+  ]
+}

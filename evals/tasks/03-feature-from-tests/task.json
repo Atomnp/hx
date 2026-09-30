@@ -1,0 +1,10 @@
+{
+  "prompt": "Implement whatever is needed so test_text.py passes.",
+  "check": "python3 -m pytest -q -p no:cacheprovider",
+  "tags": [
+    "feature"
+  ],
+  "protect": [
+    "test_text.py"
+  ]
+}

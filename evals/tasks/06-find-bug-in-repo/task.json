@@ -1,0 +1,11 @@
+{
+  "prompt": "tests/test_orders.py fails. Find the bug and fix it.",
+  "check": "python3 -m pytest -q -p no:cacheprovider",
+  "tags": [
+    "bugfix",
+    "search"
+  ],
+  "protect": [
+    "tests/test_orders.py"
+  ]
+}

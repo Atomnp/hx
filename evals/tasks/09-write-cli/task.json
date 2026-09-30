@@ -1,0 +1,11 @@
+{
+  "prompt": "Create wc.py: given a file path as its only argument, print the number of lines and words in that file, like 'lines=3 words=7'.",
+  "check": "python3 wc.py sample.txt | grep -qx 'lines=3 words=8'",
+  "tags": [
+    "feature",
+    "new-file"
+  ],
+  "protect": [
+    "sample.txt"
+  ]
+}

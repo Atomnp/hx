@@ -1,0 +1,10 @@
+{
+  "prompt": "test_utils.py fails. Fix the bug in utils.py.",
+  "check": "python3 -m pytest -q -p no:cacheprovider",
+  "tags": [
+    "bugfix"
+  ],
+  "protect": [
+    "test_utils.py"
+  ]
+}

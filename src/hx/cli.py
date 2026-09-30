@@ -44,6 +44,8 @@ def build_parser() -> argparse.ArgumentParser:
                         help="headless: run one request and exit ('-' reads the prompt from stdin)")
     parser.add_argument("--output-format", choices=["text", "json", "stream-json"], default="text",
                         help="headless output: final text, one JSON summary, or one JSON event per line")
+    parser.add_argument("--ephemeral", action="store_true",
+                        help="don't save a session or snapshot the workspace (evals, throwaway runs)")
     parser.add_argument("--allow", action="append", metavar="RULE",
                         help='add an allow rule for this run, e.g. --allow "bash(npm test*)" (repeatable)')
     return parser
@@ -174,7 +176,7 @@ def build_agent(args, interactive: bool = True):
     ctx.hooks, hook_notes = load_hooks(ctx.cwd, confirm=confirm_project_config if interactive else None)
     for note in hook_notes:
         print(f"[hx] {note}", file=sys.stderr)
-    checkpoints = None if args.no_checkpoints else checkpoints_for(ctx.cwd)
+    checkpoints = None if (args.no_checkpoints or args.ephemeral) else checkpoints_for(ctx.cwd)
     skills = discover(ctx.cwd)
     ctx.read_roots = [s.path for s in skills]
     system_prompt = build_system_prompt(ctx, skills)
@@ -212,7 +214,7 @@ def build_agent(args, interactive: bool = True):
             last_reply = next((m.content for m in reversed(agent.messages) if m.role == "assistant" and m.content), "")
             if last_user:
                 print(f"  last request: {last_user[:120]}\n  last reply:   {last_reply[:120]}")
-    else:
+    elif not args.ephemeral:
         agent.session = Session.create(ctx.cwd, settings.model)
         agent.session.message(agent.messages[0])
 
