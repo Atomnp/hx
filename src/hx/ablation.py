@@ -2,7 +2,7 @@
 
 import os
 
-KNOWN = {"repair", "diagnostics", "prompt", "reminders"}
+KNOWN = {"repair", "diagnostics", "prompt", "reminders", "verify"}
 
 
 def off(feature: str) -> bool:

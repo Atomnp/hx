@@ -1,5 +1,7 @@
 """The agent loop: call the model, run the tools it asks for, feed the results back, repeat."""
 
+from pathlib import Path
+
 from hx import ablation
 from hx.checkpoints import CheckpointError, Checkpoints
 from hx.compaction import compact
@@ -24,6 +26,10 @@ from hx.tools.todo import render, unfinished
 from hx.tools import ToolContext, ToolRegistry
 
 DEFAULT_SYSTEM_PROMPT = "You are hx, a helpful coding assistant running in the user's terminal. Be concise."
+
+# Tools whose success means files changed, and the tool that counts as checking them.
+EDIT_TOOLS = {"edit_file", "write_file"}
+VERIFY_TOOL = "bash"
 
 
 class Agent:
@@ -123,6 +129,8 @@ class Agent:
         self.add(user(text))
         guard = LoopGuard()
         reminded = False
+        verify_reminded = False
+        unverified: list[str] = []  # files changed since the last bash call, in order
         stop_hook_runs = 0
 
         self.context.set_tools(self.tools.schemas())
@@ -157,6 +165,19 @@ class Agent:
                         "or remove ones that no longer apply) and explain why.</system-reminder>"
                     ))
                     continue
+                if unverified and not verify_reminded and VERIFY_TOOL in self.tools.names() \
+                        and not ablation.off("verify"):
+                    # Files changed and nothing ran since. Models often call an edit "verified"; ask once to
+                    # actually check. A second stop is final: some changes have nothing to run.
+                    verify_reminded = True
+                    on_event(Notice(f"{len(unverified)} changed file(s) not checked yet; asking the model to verify"))
+                    self.add(user(
+                        "<system-reminder>You changed files in this turn but haven't run anything since to check "
+                        f"them: {', '.join(unverified)}. Run the relevant tests or the program with bash now. If there "
+                        "is nothing to run, or you can't verify the change, say so plainly instead of claiming it "
+                        "works.</system-reminder>"
+                    ))
+                    continue
                 if hooks and stop_hook_runs < 3:
                     # Stop hook: e.g. "run the tests; if they fail, exit 2 with the failures". Capped at 3 so a
                     # hook that always objects can't keep the agent running forever.
@@ -174,6 +195,12 @@ class Agent:
             for call in message.tool_calls:
                 on_event(ToolStarted(call))
                 result, is_error = self.run_tool(call)
+                if call.name == VERIFY_TOOL:
+                    unverified.clear()  # a command ran after the edits: pass or fail, the model has seen evidence
+                elif call.name in EDIT_TOOLS and not is_error:
+                    path = display_path(call.arguments.get("path", "?"), self.ctx.cwd)
+                    if path not in unverified:
+                        unverified.append(path)
                 result = self.context.truncate_tool_output(result)
                 if not ablation.off("repair") and (warning := guard.check(call)):
                     result += f"\n[harness: {warning}]"
@@ -258,6 +285,15 @@ def last_todos(messages: list[Message]) -> list[dict]:
             if c.name == "todo_write" and isinstance(c.arguments.get("todos"), list):
                 return c.arguments["todos"]
     return []
+
+
+def display_path(path, cwd) -> str:
+    """A path as the user thinks of it: relative to the workspace when it's inside it."""
+    p = Path(str(path))
+    try:
+        return p.resolve().relative_to(Path(cwd).resolve()).as_posix() if p.is_absolute() else p.as_posix()
+    except ValueError:
+        return str(path)
 
 
 def make_child_agent(model, tools, ctx, instructions, max_steps):
