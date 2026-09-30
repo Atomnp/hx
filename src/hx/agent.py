@@ -1,5 +1,6 @@
 """The agent loop: call the model, run the tools it asks for, feed the results back, repeat."""
 
+from hx import ablation
 from hx.checkpoints import CheckpointError, Checkpoints
 from hx.compaction import compact
 from hx.context import CHARS_PER_TOKEN, ContextManager
@@ -135,7 +136,7 @@ class Agent:
             )
             self.context.calibrate(self.messages, response.usage.prompt_tokens)
             message = response.message
-            if not message.tool_calls and self.tools.names():
+            if not message.tool_calls and self.tools.names() and not ablation.off("repair"):
                 # Some models write tool calls as text instead of using the tool-call channel.
                 calls, rest = extract_text_tool_calls(message.content, set(self.tools.names()))
                 if calls:
@@ -146,7 +147,7 @@ class Agent:
 
             if not message.tool_calls:
                 open_items = unfinished(self.ctx.todos)
-                if open_items and not reminded:
+                if open_items and not reminded and not ablation.off("reminders"):
                     # The model wants to stop with plan items still open. Remind it once; a second stop is final.
                     reminded = True
                     on_event(Notice(f"{len(open_items)} todo item(s) still open; reminding the model"))
@@ -174,7 +175,7 @@ class Agent:
                 on_event(ToolStarted(call))
                 result, is_error = self.run_tool(call)
                 result = self.context.truncate_tool_output(result)
-                if warning := guard.check(call):
+                if not ablation.off("repair") and (warning := guard.check(call)):
                     result += f"\n[harness: {warning}]"
                     on_event(Notice(f"repeated call detected: {call.name}"))
                 self.add(tool_result(call, result))

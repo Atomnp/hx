@@ -16,6 +16,10 @@ MAX_DIFF_LINES = 60
 def diagnostics(path: Path, text: str) -> str:
     """Cheap syntax check right after a write, so a broken edit is reported in the same tool result
     instead of being discovered (much) later by a failing test run."""
+    from hx import ablation
+
+    if ablation.off("diagnostics"):
+        return ""
     problem = None
     if path.suffix == ".py":
         try:

@@ -35,6 +35,12 @@ TASKS = ROOT / "tasks"
 VARIANTS: dict[str, dict] = {
     "default": {"flags": [], "env": {}},
     "think": {"flags": [], "env": {"HX_THINK": "1"}},
+    # ablations: the same model with harness features switched off
+    "no-repair": {"flags": [], "env": {"HX_ABLATE": "repair"}},
+    "minimal": {"flags": [], "env": {"HX_ABLATE": "repair,diagnostics,prompt,reminders"}},
+    # a different model, with and without the repair layer
+    "coder": {"flags": [], "env": {"HX_MODEL": "qwen2.5-coder:14b"}},
+    "coder-no-repair": {"flags": [], "env": {"HX_MODEL": "qwen2.5-coder:14b", "HX_ABLATE": "repair"}},
 }
 
 

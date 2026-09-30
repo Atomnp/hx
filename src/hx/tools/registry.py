@@ -34,9 +34,14 @@ class ToolRegistry:
         if tool is None:
             return ToolResult(f"Error: unknown tool '{call.name}'. Available tools: {', '.join(self._tools) or 'none'}", True)
 
-        args, notes = repair_arguments(call.arguments, tool.parameters)
+        from hx import ablation
 
-        if placeholders := find_placeholders(args):
+        if ablation.off("repair"):
+            args, notes = dict(call.arguments), []
+        else:
+            args, notes = repair_arguments(call.arguments, tool.parameters)
+
+        if not ablation.off("repair") and (placeholders := find_placeholders(args)):
             return ToolResult(
                 f"Error: these arguments look like unfilled placeholders: {', '.join(placeholders)}. "
                 "Use real values; look them up with the tools first if you don't know them.",

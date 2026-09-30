@@ -112,6 +112,10 @@ def project_instructions(cwd: Path) -> str:
 
 
 def build_system_prompt(ctx: ToolContext, skills: list[Skill] | None = None) -> str:
+    from hx import ablation
+
+    if ablation.off("prompt"):
+        return "You are hx, a helpful coding assistant running in the user's terminal. Be concise."
     sections = [BASE, environment(ctx)]
     if skills_text := prompt_section(skills or []):
         sections.append(skills_text)
