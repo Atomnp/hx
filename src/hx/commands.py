@@ -55,6 +55,7 @@ class Commands:
             Command("memory", "show memory files; '# fact' adds to project memory", self.memory),
             Command("stats", "tokens, model time and tool usage for this session", self.stats),
             Command("trace", "the last turn as a span tree with timings", self.trace),
+            Command("verbose", "toggle full tool arguments/results and per-call tokens", self.verbose),
             Command("exit", "quit", self.quit),
         ]}
         self.custom = load_custom(state.cwd)
@@ -113,6 +114,15 @@ class Commands:
 
     def trace(self, s, a):
         return s.tracer.tree() if getattr(s, "tracer", None) else "Tracing is off."
+
+    def verbose(self, s, a):
+        ui = getattr(s, "ui", None)
+        if ui is None or not hasattr(ui, "verbose"):
+            return "Verbose output isn't available here."
+        ui.verbose = not ui.verbose
+        if ui.verbose:
+            ui.show_context(s.agent.messages[0].content, s.agent.tools.names())
+        return f"Verbose output is {'on' if ui.verbose else 'off'}."
 
     def quit(self, s, a):
         s.exit = True

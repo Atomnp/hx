@@ -81,3 +81,15 @@ def test_remember_tool_writes_and_needs_edit_permission(setup):
     assert PermissionPolicy("ask").check(tool, {"fact": "x"}, ctx).action == ASK  # it writes a file
     assert "Remembered" in tool.run({"fact": "use uv run pytest"}, ctx).content
     assert "use uv run pytest" in (ws / ".hx" / "memory.md").read_text()
+
+
+def test_verbose_command_toggles_and_shows_the_prompt(setup):
+    from hx.ui import PlainUI
+
+    state, ws = setup
+    state.ui = PlainUI()
+    c = Commands(state)
+    assert c.handle("/verbose") == "Verbose output is on." and state.ui.verbose
+    assert c.handle("/verbose") == "Verbose output is off." and not state.ui.verbose
+    state.ui = None
+    assert "isn't available" in c.handle("/verbose")

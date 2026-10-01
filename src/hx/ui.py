@@ -1,5 +1,6 @@
 """Terminal output: RichUI for interactive use, PlainUI when output is piped."""
 
+import json
 import sys
 
 from hx.events import Event, ModelCallStarted, Notice, StepFinished, TextDelta, ToolFinished, ToolStarted, TurnFinished
@@ -39,6 +40,13 @@ def describe_call(call: ToolCall) -> str:
 
 
 class PlainUI:
+    def __init__(self, verbose: bool = False):
+        self.verbose = verbose
+
+    def show_context(self, system_prompt: str, tools: list[str]) -> None:
+        print(f"── system prompt ({len(system_prompt):,} characters) ──\n{system_prompt}")
+        print(f"── tools sent with every call ({len(tools)}): {', '.join(tools)} ──")
+
     def __call__(self, event: Event) -> None:
         if isinstance(event, TextDelta):
             print(event.text, end="", flush=True)
@@ -46,7 +54,7 @@ class PlainUI:
             print(f"\n  → {event.call.name}({event.call.arguments})", flush=True)
         elif isinstance(event, ToolFinished):
             mark = "✗" if event.is_error else "✓"
-            print(f"  {mark} {event.result[:PREVIEW]}", flush=True)
+            print(f"  {mark} {event.result if self.verbose else event.result[:PREVIEW]}", flush=True)
             for line in warning_lines(event.result):  # don't let the preview cut hide a warning the model received
                 print(f"  {line}", flush=True)
         elif isinstance(event, TurnFinished) and event.reason == "max_steps":
@@ -62,9 +70,10 @@ class PlainUI:
 
 
 class RichUI:
-    def __init__(self):
+    def __init__(self, verbose: bool = False):
         from rich.console import Console
 
+        self.verbose = verbose  # full arguments and results, a line per model call
         self.console = Console(highlight=False)
         self.live = None  # rich.live.Live while assistant text is streaming
         self.status = None  # spinner while waiting for the model
@@ -92,14 +101,14 @@ class RichUI:
 
         style = "red" if event.is_error else "dim"
         lines = event.result.splitlines()
-        shown = lines[:12]
+        shown = lines if self.verbose else lines[:12]
         for line in shown:
             if line.startswith("+") and not line.startswith("+++"):
                 self.console.print(Text("    " + line, style="green"))
             elif line.startswith("-") and not line.startswith("---"):
                 self.console.print(Text("    " + line, style="red"))
             else:
-                self.console.print(Text("    " + line[:160], style=style))
+                self.console.print(Text("    " + (line if self.verbose else line[:160]), style=style))
         if len(lines) > len(shown):
             self.console.print(Text(f"    … {len(lines) - len(shown)} more lines", style="dim italic"))
         for line in warning_lines(event.result):
@@ -114,6 +123,8 @@ class RichUI:
 
         if isinstance(event, ModelCallStarted):
             self.end_text()
+            if self.verbose:
+                self.console.print(Text(f"  ── model call {event.step} ──", style="dim"))
             self.status = self.console.status("[dim]thinking…[/dim]", spinner="dots")
             self.status.start()
         elif isinstance(event, TextDelta):
@@ -129,6 +140,9 @@ class RichUI:
             self.end_text()
             self.console.print(Text.assemble(("  ⏺ ", "cyan"), (event.call.name, "bold cyan"),
                                              (f"({describe_call(event.call)})", "cyan")))
+            if self.verbose:  # exactly what the model sent, newlines and all
+                for k, v in event.call.arguments.items():
+                    self.print_block(f"{k}:", v if isinstance(v, str) else json.dumps(v, indent=2, ensure_ascii=False))
         elif isinstance(event, ToolFinished):
             self.render_result(event)
         elif isinstance(event, Notice):
@@ -141,6 +155,11 @@ class RichUI:
             self.tokens_out += event.usage.completion_tokens
             self.seconds += event.usage.duration_s
             self.context = event.context_used
+            if self.verbose:
+                u = event.usage
+                self.console.print(Text(f"  [model call {event.step}: read {u.prompt_tokens:,} tokens, wrote "
+                                        f"{u.completion_tokens:,} · {u.duration_s:.1f}s · context {event.context_used:.0%}]",
+                                        style="dim"))
         elif isinstance(event, TurnFinished):
             self.stop_spinner()
             self.end_text()
@@ -153,16 +172,31 @@ class RichUI:
                 style="dim"))
             self.tokens_out, self.seconds = 0, 0.0
 
+    def print_block(self, label: str, text: str) -> None:
+        from rich.text import Text
+
+        self.console.print(Text(f"    {label}", style="dim cyan"))
+        for line in text.splitlines() or [""]:
+            self.console.print(Text(f"      {line}", style="dim"))
+
+    def show_context(self, system_prompt: str, tools: list[str]) -> None:
+        """What the model receives before your first word: the system prompt and the tool list."""
+        from rich.text import Text
+
+        self.console.print(Text(f"── system prompt ({len(system_prompt):,} characters) ──", style="bold dim"))
+        self.console.print(Text(system_prompt, style="dim"))
+        self.console.print(Text(f"── tools sent with every call ({len(tools)}): {', '.join(tools)} ──", style="bold dim"))
+
     def cleanup(self):
         """After an interrupt: make sure no spinner or live region is left running."""
         self.stop_spinner()
         self.end_text()
 
 
-def make_ui():
+def make_ui(verbose: bool = False):
     if sys.stdout.isatty():
         try:
-            return RichUI()
+            return RichUI(verbose)
         except ImportError:
             pass
-    return PlainUI()
+    return PlainUI(verbose)

@@ -87,3 +87,52 @@ def test_long_arguments_show_that_they_were_cut():
     text = describe_call(ToolCall("1", "bash", {"command": "x" * 100}))
     assert text == "command='" + "x" * 60 + "… (+40 chars)'"
     assert describe_call(ToolCall("1", "grep", {"pattern": "def main"})) == "pattern='def main'"
+
+
+LONG_RESULT = "\n".join(f"line {i}" for i in range(30))
+
+
+def rich_ui(verbose):
+    from rich.console import Console
+
+    ui = RichUI(verbose=verbose)
+    ui.console = Console(file=io.StringIO(), force_terminal=False, width=200)
+    return ui
+
+
+def run_events(ui):
+    c = ToolCall("1", "write_file", {"path": "a.py", "content": "def f():\n    return 1\n"})
+    for e in [ModelCallStarted(1), ToolStarted(c), ToolFinished(c, LONG_RESULT),
+              StepFinished(1, Usage(2073, 124, 18.0), 0.13), TurnFinished("ok", 1, "done")]:
+        ui(e)
+    ui.cleanup()
+    return ui.console.file.getvalue()
+
+
+def test_verbose_rich_ui_shows_everything():
+    text = run_events(rich_ui(verbose=True))
+    assert "── model call 1 ──" in text
+    assert "content:" in text and "    return 1" in text                  # full argument, real newlines
+    assert "line 29" in text and "more lines" not in text                # full result
+    assert "read 2,073 tokens, wrote 124 · 18.0s · context 13%" in text
+
+
+def test_normal_rich_ui_stays_short():
+    text = run_events(rich_ui(verbose=False))
+    assert "model call 1" not in text and "content:" not in text
+    assert "line 29" not in text and "18 more lines" in text
+
+
+def test_show_context_prints_the_system_prompt_and_tools():
+    ui = rich_ui(verbose=True)
+    ui.show_context("You are hx.\n# Environment\n- Workspace: /w", ["read_file", "bash"])
+    text = ui.console.file.getvalue()
+    assert "system prompt (41 characters)" in text and "- Workspace: /w" in text
+    assert "tools sent with every call (2): read_file, bash" in text
+
+
+def test_verbose_plain_ui_prints_full_results(capsys):
+    ui = PlainUI(verbose=True)
+    c = ToolCall("1", "read_file", {"path": "a.py"})
+    ui(ToolFinished(c, "x" * 500))
+    assert "x" * 500 in capsys.readouterr().out

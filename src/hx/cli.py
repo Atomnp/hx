@@ -46,6 +46,8 @@ def build_parser() -> argparse.ArgumentParser:
                         help="headless output: final text, one JSON summary, or one JSON event per line")
     parser.add_argument("--ephemeral", action="store_true",
                         help="don't save a session or snapshot the workspace (evals, throwaway runs)")
+    parser.add_argument("-v", "--verbose", action="store_true",
+                        help="show the system prompt, full tool arguments and results, and tokens per model call")
     parser.add_argument("--allow", action="append", metavar="RULE",
                         help='add an allow rule for this run, e.g. --allow "bash(npm test*)" (repeatable)')
     return parser
@@ -109,9 +111,10 @@ class ReplState:
     exit: bool = False
     tracer: Tracer | None = None
     stats: Stats | None = None
+    ui: object = None
 
 
-def repl(agent: Agent) -> None:
+def repl(agent: Agent, verbose: bool = False) -> None:
     mode = agent.ctx.permissions.mode if agent.ctx.permissions else "none"
     sandbox = "on" if agent.ctx.sandbox and agent.ctx.sandbox.enabled else "off"
     print(f"hx {__version__} · {agent.model.name} · permissions: {mode} · sandbox: {sandbox}")
@@ -120,9 +123,11 @@ def repl(agent: Agent) -> None:
     tracer = Tracer(agent.model.name.split(":", 1)[-1], agent.model.name.split(":", 1)[0],
                     path=TRACE_DIR / f"{session_id}.jsonl", otlp_endpoint=os.environ.get("HX_OTLP_ENDPOINT"))
     stats = Stats()
-    state = ReplState(agent, agent.ctx.cwd, tracer=tracer, stats=stats)
+    ui = make_ui(verbose)
+    state = ReplState(agent, agent.ctx.cwd, tracer=tracer, stats=stats, ui=ui)
     commands = Commands(state)
-    ui = make_ui()
+    if verbose:
+        ui.show_context(agent.messages[0].content, agent.tools.names())
     handler = fanout(ui, tracer, stats)
     enable_history()
     while not state.exit:
@@ -242,7 +247,7 @@ def main(argv: list[str] | None = None) -> int:
 
             prompt = sys.stdin.read() if args.print == "-" else args.print
             return run_headless(agent, prompt, args.output_format)
-        repl(agent)
+        repl(agent, verbose=args.verbose)
     finally:
         cleanup()
     return 0
