@@ -3,12 +3,39 @@
 import sys
 
 from hx.events import Event, ModelCallStarted, Notice, StepFinished, TextDelta, ToolFinished, ToolStarted, TurnFinished
+from hx.messages import ToolCall
 
 PREVIEW = 200
+ARG_PREVIEW = 60  # characters of each argument shown in a tool line
 
 
 def warning_lines(result: str) -> list[str]:
     return [line for line in result[PREVIEW:].splitlines() if line.startswith("⚠")]
+
+
+def count_lines(text: str) -> int:
+    return len(text.splitlines())
+
+
+def describe_call(call: ToolCall) -> str:
+    """One readable line for a tool call. File tools get a summary (the diff in the result shows the change);
+    other arguments are shortened, with a visible mark when something was cut."""
+    a = call.arguments
+    if call.name == "edit_file":
+        old, new = str(a.get("old_string", "")), str(a.get("new_string", ""))
+        every = ", every match" if a.get("replace_all") else ""
+        return f"{a.get('path', '?')}: replace {count_lines(old)} line(s) with {count_lines(new)}{every}"
+    if call.name == "write_file":
+        return f"{a.get('path', '?')}: {count_lines(str(a.get('content', '')))} line(s)"
+    if call.name == "todo_write" and isinstance(a.get("todos"), list):
+        return f"{len(a['todos'])} item(s)"
+    parts = []
+    for k, v in a.items():
+        text = str(v)
+        if len(text) > ARG_PREVIEW:
+            text = f"{text[:ARG_PREVIEW]}… (+{len(text) - ARG_PREVIEW} chars)"
+        parts.append(f"{k}={text!r}")
+    return ", ".join(parts)
 
 
 class PlainUI:
@@ -100,8 +127,8 @@ class RichUI:
         elif isinstance(event, ToolStarted):
             self.stop_spinner()
             self.end_text()
-            args = ", ".join(f"{k}={str(v)[:60]!r}" for k, v in event.call.arguments.items())
-            self.console.print(Text.assemble(("  ⏺ ", "cyan"), (event.call.name, "bold cyan"), (f"({args})", "cyan")))
+            self.console.print(Text.assemble(("  ⏺ ", "cyan"), (event.call.name, "bold cyan"),
+                                             (f"({describe_call(event.call)})", "cyan")))
         elif isinstance(event, ToolFinished):
             self.render_result(event)
         elif isinstance(event, Notice):

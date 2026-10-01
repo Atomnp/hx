@@ -67,3 +67,23 @@ def test_rich_ui_renders_without_errors():
     ui.cleanup()
     text = ui.console.file.getvalue()
     assert "edit_file" in text and "Plan" in text and "1 step(s)" in text
+
+
+def test_edit_calls_are_summarized_not_cut():
+    from hx.ui import describe_call
+
+    old = "def add(a, b):\n    result = a + b\n    if result > 500:\n        return 0\n    return result"
+    c = ToolCall("1", "edit_file", {"path": "m.py", "old_string": old, "new_string": old + "\n\ndef sub(a, b):\n    return a - b"})
+    assert describe_call(c) == "m.py: replace 5 line(s) with 8"
+    c = ToolCall("1", "edit_file", {"path": "m.py", "old_string": "100", "new_string": "500", "replace_all": True})
+    assert describe_call(c) == "m.py: replace 1 line(s) with 1, every match"
+    assert describe_call(ToolCall("1", "write_file", {"path": "t.py", "content": "a\nb\n"})) == "t.py: 2 line(s)"
+    assert describe_call(ToolCall("1", "todo_write", {"todos": [{}, {}]})) == "2 item(s)"
+
+
+def test_long_arguments_show_that_they_were_cut():
+    from hx.ui import describe_call
+
+    text = describe_call(ToolCall("1", "bash", {"command": "x" * 100}))
+    assert text == "command='" + "x" * 60 + "… (+40 chars)'"
+    assert describe_call(ToolCall("1", "grep", {"pattern": "def main"})) == "pattern='def main'"
