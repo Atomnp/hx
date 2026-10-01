@@ -113,3 +113,30 @@ def test_write_reports_bad_json(env):
     root, run = env
     assert "syntax error" in run("write_file", path="c.json", content='{"a": 1,}').content
     assert "syntax error" not in run("write_file", path="d.json", content='{"a": 1}').content
+
+
+MODULE = "".join(f"def f{i}(x):\n    return x + {i}\n\n" for i in range(6))  # 18 lines
+
+
+def test_whole_file_edit_works_but_gets_a_hint(env):
+    root, run = env
+    (root / "m.py").write_text(MODULE)
+    run("read_file", path="m.py")
+    r = run("edit_file", path="m.py", old_string=MODULE, new_string=MODULE.replace("x + 5", "x + 50"))
+    assert not r.is_error and "+    return x + 50" in r.content
+    assert "[harness: old_string was 18 of the file's 18 lines" in r.content and "write_file" in r.content
+
+
+def test_focused_edit_gets_no_hint(env):
+    root, run = env
+    (root / "m.py").write_text(MODULE)
+    run("read_file", path="m.py")
+    r = run("edit_file", path="m.py", old_string="    return x + 5\n", new_string="    return x + 50\n")
+    assert not r.is_error and "[harness:" not in r.content
+
+
+def test_small_files_get_no_hint(env):
+    root, run = env
+    (root / "a.py").write_text("X = 1\n")
+    run("read_file", path="a.py")
+    assert "[harness:" not in run("edit_file", path="a.py", old_string="X = 1\n", new_string="X = 2\n").content

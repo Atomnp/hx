@@ -130,6 +130,20 @@ def line_of(text: str, index: int) -> int:
     return text.count("\n", 0, index) + 1
 
 
+# A "small edit" that sends most of the file twice costs output tokens, the slowest part of a local model.
+WHOLE_FILE_SHARE = 0.8
+WHOLE_FILE_MIN_LINES = 10
+
+
+def whole_file_hint(text: str, old: str) -> str:
+    """A note for the model when old_string is most of the file. The edit still happens."""
+    total = len(text.splitlines())
+    if total < WHOLE_FILE_MIN_LINES or len(old) < WHOLE_FILE_SHARE * len(text):
+        return ""
+    return (f"\n[harness: old_string was {len(old.splitlines())} of the file's {total} lines. For a small change, send "
+            "only the lines that change plus a little context: it's faster. For a full rewrite, use write_file.]")
+
+
 class EditFile(Tool):
     subject_arg = "path"
     name = "edit_file"
@@ -193,7 +207,8 @@ class EditFile(Tool):
         after = text.replace(old, new) if args.get("replace_all") else text.replace(old, new, 1)
         path.write_text(after)
         mark_read(ctx, path)
-        return ToolResult(f"Edited {path}: {count} replacement(s).\n{diff(text, after, path)}{diagnostics(path, after)}")
+        return ToolResult(f"Edited {path}: {count} replacement(s).\n{diff(text, after, path)}{diagnostics(path, after)}"
+                          f"{whole_file_hint(text, old)}")
 
     @staticmethod
     def not_found_message(path: Path, text: str, old: str) -> str:
