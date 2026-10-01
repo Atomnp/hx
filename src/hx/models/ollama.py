@@ -36,6 +36,14 @@ def parse_tool_calls(raw: list[dict[str, Any]]) -> list[ToolCall]:
     return calls
 
 
+def keep_alive_value(text: str) -> str | int:
+    """Ollama reads keep_alive as a duration string ("30m") or a number of seconds; "-1" alone is not a duration."""
+    try:
+        return int(text)
+    except ValueError:
+        return text
+
+
 class OllamaClient:
     def __init__(self, settings: Settings | None = None, timeout: float = 600):
         self.settings = settings or Settings.from_env()
@@ -55,6 +63,7 @@ class OllamaClient:
             "stream": True,
             "think": s.think,
             "options": {"num_ctx": s.num_ctx, "temperature": s.temperature},
+            "keep_alive": keep_alive_value(s.keep_alive),
         }
         if tools:
             body["tools"] = tools

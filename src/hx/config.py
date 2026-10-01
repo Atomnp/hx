@@ -16,6 +16,10 @@ class Settings:
     # qwen3 can "think" before answering. Off by default: much faster, and tool use still works.
     think: bool = False
     temperature: float = 0.2
+    # How long Ollama keeps the model in memory after a request. Its own default is 5m, so a pause
+    # longer than that makes the next request reload the model first. A duration ("30m", "2h"), or seconds
+    # ("-1" = keep it loaded until Ollama stops, "0" = unload right away).
+    keep_alive: str = "30m"
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -29,4 +33,5 @@ class Settings:
             s.host = "http://" + s.host
         s.num_ctx = int(os.environ.get("HX_NUM_CTX", s.num_ctx))
         s.think = os.environ.get("HX_THINK", "0") == "1"
+        s.keep_alive = os.environ.get("HX_KEEP_ALIVE", s.keep_alive)
         return s

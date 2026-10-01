@@ -81,3 +81,24 @@ def test_wire_format_for_tool_messages():
 def test_unreachable_server_gives_helpful_error():
     with pytest.raises(ModelError, match="Is it running"):
         OllamaClient(Settings(host="http://127.0.0.1:9"), timeout=2).chat([user("hi")])
+
+
+DONE = {"message": {"role": "assistant", "content": "ok"}, "done": True, "prompt_eval_count": 1, "eval_count": 1}
+
+
+def test_asks_ollama_to_keep_the_model_loaded():
+    server, received = serve([DONE])
+    client_for(server).chat([user("hi")])
+    server.shutdown()
+    assert received[0]["keep_alive"] == "30m"
+
+
+@pytest.mark.parametrize("env, sent", [("2h", "2h"), ("-1", -1), ("0", 0), ("600", 600)])
+def test_keep_alive_from_the_environment(monkeypatch, env, sent):
+    monkeypatch.setenv("HX_KEEP_ALIVE", env)
+    server, received = serve([DONE])
+    settings = Settings.from_env()
+    settings.host = f"http://127.0.0.1:{server.server_port}"
+    OllamaClient(settings).chat([user("hi")])
+    server.shutdown()
+    assert received[0]["keep_alive"] == sent
